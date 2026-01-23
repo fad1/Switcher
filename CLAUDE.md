@@ -1,0 +1,173 @@
+# SimpleSwitcher
+
+A minimal Cmd+Tab replacement for macOS. Shows only apps with visible windows, ordered by most recently used.
+
+## Project Overview
+
+SimpleSwitcher intercepts the native Cmd+Tab hotkey and displays a custom switcher panel. It filters out:
+- Hidden apps
+- Apps with only minimized windows
+- Background-only apps
+
+**Total codebase: ~850 lines across 7 Swift files**
+
+## Architecture
+
+```
+Sources/SimpleSwitcher/
+├── main.swift           # Entry point, signal handlers for clean shutdown
+├── AppDelegate.swift    # App lifecycle, state machine, coordinates components
+├── HotkeyManager.swift  # Carbon hotkey registration, CGEvent tap for modifiers
+├── AppListProvider.swift# Queries visible apps, maintains MRU order
+├── AppSwitcherPanel.swift# NSPanel subclass with visual effect blur
+├── AppItemView.swift    # Individual app item (icon + name)
+└── PrivateAPIs.swift    # CGSSetSymbolicHotKeyEnabled binding
+```
+
+### Component Responsibilities
+
+**main.swift**
+- Sets up signal handlers (SIGTERM, SIGINT, SIGTRAP) to restore native Cmd+Tab on crash
+- Sets NSSetUncaughtExceptionHandler for Objective-C exceptions
+- Creates NSApplication and AppDelegate
+
+**AppDelegate.swift**
+- State machine: `idle` <-> `active`
+- Coordinates HotkeyManager and AppSwitcherPanel
+- Handles keyboard shortcuts (Tab, Shift, Arrows, H, Escape, Return)
+- Handles mouse clicks (inside panel = activate, outside = dismiss)
+
+**HotkeyManager.swift**
+- Registers Cmd+Tab using Carbon's RegisterEventHotKey API
+- Creates CGEvent tap to monitor:
+  - flagsChanged: Detect Cmd release (dismiss), Shift press (previous)
+  - keyDown: Forward to delegate, block when active
+  - mouseDown: Forward click location to delegate
+
+**AppListProvider.swift**
+- Maintains MRU (Most Recently Used) order via NSWorkspace notifications
+- `getVisibleApps()`: Returns apps with on-screen windows, sorted by MRU
+- Uses CGWindowListCopyWindowInfo to find visible windows
+- Filters: layer == 0, isOnScreen == true, valid bounds
+
+**AppSwitcherPanel.swift**
+- NSPanel with `.nonactivatingPanel` style (doesn't steal focus)
+- NSVisualEffectView with `.hudWindow` material (blur effect)
+- Centers on screen containing mouse cursor (multi-monitor support)
+- Manages selection state and app item views
+
+**AppItemView.swift**
+- Displays app icon (64x64) and name (truncated, 2 lines max)
+- Mouse tracking for hover selection
+- Selection highlight (white 30% alpha background)
+
+**PrivateAPIs.swift**
+- Declares CGSSetSymbolicHotKeyEnabled using @_silgen_name
+- Disables system Cmd+Tab, Cmd+Shift+Tab, Cmd+` hotkeys
+- Must be restored on app exit (done in emergencyExit and applicationWillTerminate)
+
+## Key APIs Used
+
+### Private/Undocumented
+- `CGSSetSymbolicHotKeyEnabled` - Disables system symbolic hotkeys
+  - Located in SkyLight.framework (private)
+  - Effect persists after app quits; must restore on exit
+
+### Carbon (legacy but required)
+- `RegisterEventHotKey` - Register global hotkey
+- `EventHotKeyID`, `EventHotKeyRef` - Hotkey identification
+- `kVK_Tab` - Virtual key codes
+
+### Core Graphics
+- `CGEvent.tapCreate` - Monitor keyboard/mouse events
+- `CGWindowListCopyWindowInfo` - Query window list
+- `kCGWindowIsOnscreen`, `kCGWindowLayer` - Window properties
+
+### AppKit
+- `NSRunningApplication` - Query running apps
+- `NSWorkspace.didActivateApplicationNotification` - Track app activations
+- `NSPanel` with `.nonactivatingPanel` - Floating panel that doesn't steal focus
+- `NSVisualEffectView` - macOS blur effect
+
+## MRU (Most Recently Used) Tracking
+
+1. On launch, `AppListProvider.startObserving()` registers for workspace notifications
+2. `didActivateApplicationNotification` updates MRU list (most recent at index 0)
+3. `didTerminateApplicationNotification` removes terminated apps
+4. `getVisibleApps()` sorts filtered apps by MRU order
+5. Switcher opens with second app selected (index 1) for quick Alt-Tab behavior
+
+## Permissions Required
+
+**Input Monitoring** (System Settings > Privacy & Security > Input Monitoring)
+- Required for CGEvent tap to work
+- Without this, event tap creation fails and hotkeys won't work
+- App prompts user on first launch
+
+## Build & Run
+
+### Development
+```bash
+cd /Users/Shared/sv-fahd/SimpleSwitcher
+swift build
+.build/debug/SimpleSwitcher
+```
+
+### Release Build
+```bash
+swift build -c release
+.build/release/SimpleSwitcher
+```
+
+### Create App Bundle
+```bash
+./build-app.sh
+```
+This creates `SimpleSwitcher.app` which can be moved to `/Applications`.
+
+### Auto-Start at Login
+1. Move `SimpleSwitcher.app` to `/Applications`
+2. Open System Settings > General > Login Items
+3. Click + and add SimpleSwitcher
+
+## Keyboard Shortcuts (while panel is open)
+
+| Key | Action |
+|-----|--------|
+| Tab | Select next app |
+| Shift | Select previous app |
+| Left Arrow | Select previous app |
+| Right Arrow | Select next app |
+| H | Hide selected app |
+| Return | Activate selected app |
+| Escape | Dismiss without switching |
+| Release Cmd | Activate selected app |
+
+## Known Limitations
+
+1. **No window thumbnails** - Would require Screen Recording permission
+2. **No per-window switching** - Shows apps, not individual windows
+3. **No preferences UI** - Configuration requires code changes
+4. **Not code-signed** - May trigger Gatekeeper on first run
+5. **Private API usage** - CGSSetSymbolicHotKeyEnabled may break in future macOS
+
+## Potential Improvements
+
+- [ ] Q key to quit selected app
+- [ ] Number keys (1-9) for quick selection
+- [ ] Window thumbnails (requires Screen Recording permission)
+- [ ] Preferences pane (configurable shortcuts, appearance)
+- [ ] Proper app icon
+- [ ] Code signing and notarization
+- [ ] Handle fullscreen apps better
+
+## Troubleshooting
+
+### "Failed to create event tap"
+Grant Input Monitoring permission in System Settings > Privacy & Security > Input Monitoring. May need to remove and re-add the app if permissions changed.
+
+### Native Cmd+Tab still works
+The app may have crashed without restoring the hotkey. Run the app again and quit cleanly, or log out/restart.
+
+### Panel doesn't appear
+Check Console.app for errors. Ensure app has proper permissions.
