@@ -43,6 +43,8 @@ Sources/SimpleSwitcher/
   - flagsChanged: Detect Cmd release (dismiss), Shift press (previous)
   - keyDown: Forward to delegate, block when active
   - mouseDown: Forward click location to delegate
+- **Thread safety**: Uses `DispatchQueue` for synchronized access to `isActive` state
+- **Critical**: Sets `isActive` synchronously in event handlers before async delegate calls to avoid race conditions in release builds
 
 **AppListProvider.swift**
 - Maintains MRU (Most Recently Used) order via NSWorkspace notifications
@@ -121,7 +123,12 @@ swift build -c release
 
 ### Create App Bundle
 ```bash
+# Debug build (default)
 ./build-app.sh
+
+# Release build (optimized)
+swift build -c release
+./build-app.sh release
 ```
 This creates `SimpleSwitcher.app` which can be moved to `/Applications`.
 
@@ -151,6 +158,14 @@ This creates `SimpleSwitcher.app` which can be moved to `/Applications`.
 4. **Not code-signed** - May trigger Gatekeeper on first run
 5. **Private API usage** - CGSSetSymbolicHotKeyEnabled may break in future macOS
 
+## Threading Notes
+
+The CGEvent tap callback runs on a separate thread from the main UI thread. In release builds (with compiler optimizations), race conditions can cause the event tap to miss state changes. The fix:
+
+1. `isActive` state is protected by a serial `DispatchQueue`
+2. State is set **synchronously** in event handlers, before any async delegate calls
+3. This ensures the event tap sees the correct state even with aggressive compiler optimizations
+
 ## Potential Improvements
 
 - [ ] Q key to quit selected app
@@ -160,6 +175,16 @@ This creates `SimpleSwitcher.app` which can be moved to `/Applications`.
 - [ ] Proper app icon
 - [ ] Code signing and notarization
 - [ ] Handle fullscreen apps better
+
+## References
+
+The [AltTab](https://github.com/lwouis/alt-tab-macos) codebase (located at `/Users/Shared/sv-fahd/alt-tab-macos`) is an excellent reference for:
+- CGEvent tap patterns and threading
+- Private API usage (`CGSSetSymbolicHotKeyEnabled`, etc.)
+- Window listing and filtering
+- macOS accessibility APIs
+
+Since Apple's documentation for these low-level APIs is sparse or nonexistent, AltTab's production code serves as practical documentation.
 
 ## Troubleshooting
 

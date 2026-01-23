@@ -1,0 +1,49 @@
+{
+  "": {
+    "dependencies": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/SimpleSwitcher.d",
+    "object": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/SimpleSwitcher.o",
+    "swift-dependencies": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/master.swiftdeps"
+  },
+  "/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/AppDelegate.swift": {
+    "object": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppDelegate.swift.o",
+    "swiftmodule": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppDelegate~partial.swiftmodule",
+    "swift-dependencies": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppDelegate.swiftdeps",
+    "diagnostics": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppDelegate.dia"
+  },
+  "/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/AppItemView.swift": {
+    "object": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppItemView.swift.o",
+    "swiftmodule": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppItemView~partial.swiftmodule",
+    "swift-dependencies": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppItemView.swiftdeps",
+    "diagnostics": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppItemView.dia"
+  },
+  "/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/AppListProvider.swift": {
+    "object": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppListProvider.swift.o",
+    "swiftmodule": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppListProvider~partial.swiftmodule",
+    "swift-dependencies": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppListProvider.swiftdeps",
+    "diagnostics": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppListProvider.dia"
+  },
+  "/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/AppSwitcherPanel.swift": {
+    "object": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppSwitcherPanel.swift.o",
+    "swiftmodule": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppSwitcherPanel~partial.swiftmodule",
+    "swift-dependencies": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppSwitcherPanel.swiftdeps",
+    "diagnostics": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/AppSwitcherPanel.dia"
+  },
+  "/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/HotkeyManager.swift": {
+    "object": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/HotkeyManager.swift.o",
+    "swiftmodule": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/HotkeyManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/HotkeyManager.swiftdeps",
+    "diagnostics": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/HotkeyManager.dia"
+  },
+  "/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/PrivateAPIs.swift": {
+    "object": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/PrivateAPIs.swift.o",
+    "swiftmodule": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/PrivateAPIs~partial.swiftmodule",
+    "swift-dependencies": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/PrivateAPIs.swiftdeps",
+    "diagnostics": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/PrivateAPIs.dia"
+  },
+  "/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/main.swift": {
+    "object": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/main.swift.o",
+    "swiftmodule": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/main.swiftdeps",
+    "diagnostics": "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/release/SimpleSwitcher.build/main.dia"
+  }
+}

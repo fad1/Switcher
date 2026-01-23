@@ -52,8 +52,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     // MARK: - HotkeyManagerDelegate
 
     func hotkeyTriggered() {
+        // HotkeyManager already set isActive = true
         guard state == .idle else {
             // Already active - Tab handling is done in keyPressed()
+            // Keep isActive = true since we're still active
             return
         }
 
@@ -62,6 +64,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
 
         guard !currentApps.isEmpty else {
             print("No visible apps to switch to")
+            // Reset since we're not actually activating
+            hotkeyManager.isActive = false
             return
         }
 
@@ -70,7 +74,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         panel.showWithApps(currentApps, selectIndex: selectIndex)
 
         state = .active
-        hotkeyManager.isActive = true
+        // isActive already set by HotkeyManager
     }
 
     func modifierKeyReleased() {

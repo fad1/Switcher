@@ -20,11 +20,22 @@ class HotkeyManager {
     private var hotKeyPressedHandler: EventHandlerRef?
     private var eventTap: CFMachPort?
 
-    // Track if shift was already down to detect "tap"
-    private var shiftWasDown = false
+    // Serial queue for thread-safe state access
+    private let stateQueue = DispatchQueue(label: "com.simpleswitcher.state")
 
-    // Track if panel is active (to block key events from reaching other apps)
-    var isActive = false
+    // State protected by stateQueue
+    private var _isActive = false
+    private var _shiftWasDown = false
+
+    var isActive: Bool {
+        get { stateQueue.sync { _isActive } }
+        set { stateQueue.sync { _isActive = newValue } }
+    }
+
+    private var shiftWasDown: Bool {
+        get { stateQueue.sync { _shiftWasDown } }
+        set { stateQueue.sync { _shiftWasDown = newValue } }
+    }
 
     func start() {
         registerCmdTabHotkey()
@@ -70,6 +81,8 @@ class HotkeyManager {
 
             if let userData = userData {
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
+                // Set active immediately so event tap knows to block events
+                manager.isActive = true
                 DispatchQueue.main.async {
                     manager.delegate?.hotkeyTriggered()
                 }
@@ -123,17 +136,21 @@ class HotkeyManager {
                 // Check if Command key was released
                 if !cmdIsDown {
                     manager.shiftWasDown = false
+                    // Set inactive immediately
+                    manager.isActive = false
                     DispatchQueue.main.async {
                         manager.delegate?.modifierKeyReleased()
                     }
                 }
             } else if type == .keyDown {
-                let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-                DispatchQueue.main.async {
-                    manager.delegate?.keyPressed(keyCode)
-                }
-                // Block key event from reaching other apps when panel is active
-                if manager.isActive {
+                // Check active state first
+                let active = manager.isActive
+                if active {
+                    let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+                    DispatchQueue.main.async {
+                        manager.delegate?.keyPressed(keyCode)
+                    }
+                    // Block key event from reaching other apps
                     return nil
                 }
             } else if type == .leftMouseDown || type == .rightMouseDown {

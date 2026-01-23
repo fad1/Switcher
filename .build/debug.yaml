@@ -1,0 +1,81 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "PackageStructure": ["<PackageStructure>"]
+  "SimpleSwitcher-arm64-apple-macosx15.0-debug.exe": ["<SimpleSwitcher-arm64-apple-macosx15.0-debug.exe>"]
+  "SimpleSwitcher-arm64-apple-macosx15.0-debug.module": ["<SimpleSwitcher-arm64-apple-macosx15.0-debug.module>"]
+  "main": ["<SimpleSwitcher-arm64-apple-macosx15.0-debug.exe>","<SimpleSwitcher-arm64-apple-macosx15.0-debug.module>"]
+  "test": ["<SimpleSwitcher-arm64-apple-macosx15.0-debug.exe>","<SimpleSwitcher-arm64-apple-macosx15.0-debug.module>"]
+default: "main"
+nodes:
+  "/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher":
+    is-mutated: true
+commands:
+  "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher-entitlement.plist":
+    tool: write-auxiliary-file
+    inputs: ["<entitlement-plist>","<com.apple.security.get-task-allow>"]
+    outputs: ["/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher-entitlement.plist"]
+    description: "Write auxiliary file /Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher-entitlement.plist"
+
+  "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/AppDelegate.swift","/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/AppItemView.swift","/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/AppListProvider.swift","/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/AppSwitcherPanel.swift","/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/HotkeyManager.swift","/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/PrivateAPIs.swift","/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/main.swift"]
+    outputs: ["/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/sources"]
+    description: "Write auxiliary file /Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/sources"
+
+  "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppDelegate.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppItemView.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppListProvider.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppSwitcherPanel.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/HotkeyManager.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/PrivateAPIs.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/main.swift.o"]
+    outputs: ["/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.product/Objects.LinkFileList"
+
+  "/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"]
+    outputs: ["/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+
+  "<SimpleSwitcher-arm64-apple-macosx15.0-debug.exe>":
+    tool: phony
+    inputs: ["<SimpleSwitcher-arm64-apple-macosx15.0-debug.exe-CodeSigning>"]
+    outputs: ["<SimpleSwitcher-arm64-apple-macosx15.0-debug.exe>"]
+
+  "<SimpleSwitcher-arm64-apple-macosx15.0-debug.module>":
+    tool: phony
+    inputs: ["/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppDelegate.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppItemView.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppListProvider.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppSwitcherPanel.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/HotkeyManager.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/PrivateAPIs.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/main.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/Modules/SimpleSwitcher.swiftmodule"]
+    outputs: ["<SimpleSwitcher-arm64-apple-macosx15.0-debug.module>"]
+
+  "C.SimpleSwitcher-arm64-apple-macosx15.0-debug.exe":
+    tool: shell
+    inputs: ["/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppDelegate.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppItemView.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppListProvider.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppSwitcherPanel.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/HotkeyManager.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/PrivateAPIs.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/main.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.product/Objects.LinkFileList"]
+    outputs: ["/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher"]
+    description: "Linking ./.build/arm64-apple-macosx/debug/SimpleSwitcher"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-L","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug","-o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher","-module-name","SimpleSwitcher","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-alias","-Xlinker","_SimpleSwitcher_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-6.2/macosx","-target","arm64-apple-macosx12.0","-framework","Carbon","-Xlinker","-add_ast_path","-Xlinker","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/Modules/SimpleSwitcher.swiftmodule","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g"]
+
+  "C.SimpleSwitcher-arm64-apple-macosx15.0-debug.exe-entitlements":
+    tool: shell
+    inputs: ["/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher-entitlement.plist"]
+    outputs: ["<SimpleSwitcher-arm64-apple-macosx15.0-debug.exe-CodeSigning>"]
+    description: "Applying debug entitlements to ./.build/arm64-apple-macosx/debug/SimpleSwitcher"
+    args: ["codesign","--force","--sign","-","--entitlements","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher-entitlement.plist","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher"]
+
+  "C.SimpleSwitcher-arm64-apple-macosx15.0-debug.module":
+    tool: shell
+    inputs: ["/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/AppDelegate.swift","/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/AppItemView.swift","/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/AppListProvider.swift","/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/AppSwitcherPanel.swift","/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/HotkeyManager.swift","/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/PrivateAPIs.swift","/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/main.swift","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/sources"]
+    outputs: ["/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppDelegate.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppItemView.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppListProvider.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/AppSwitcherPanel.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/HotkeyManager.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/PrivateAPIs.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/main.swift.o","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/Modules/SimpleSwitcher.swiftmodule"]
+    description: "Compiling Swift Module 'SimpleSwitcher' (7 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","SimpleSwitcher","-emit-dependencies","-emit-module","-emit-module-path","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/Modules/SimpleSwitcher.swiftmodule","-output-file-map","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/output-file-map.json","-incremental","-c","@/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/SimpleSwitcher.build/sources","-I","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx12.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j8","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/Shared/sv-fahd/SimpleSwitcher/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","SimpleSwitcher_main","-color-diagnostics","-swift-version","5","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","simpleswitcher"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/Shared/sv-fahd/SimpleSwitcher/Sources/SimpleSwitcher/","/Users/Shared/sv-fahd/SimpleSwitcher/Package.swift","/Users/Shared/sv-fahd/SimpleSwitcher/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+
