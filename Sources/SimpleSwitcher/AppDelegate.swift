@@ -99,10 +99,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     func mouseClicked(at point: CGPoint) {
         guard state == .active else { return }
 
-        // Activate selected app and dismiss (hover already selected the right app)
-        if let selectedApp = panel.getSelectedApp() {
-            activateApp(selectedApp)
+        // Use NSEvent.mouseLocation for consistent coordinate system with panel.frame
+        let mouseLocation = NSEvent.mouseLocation
+
+        if panel.frame.contains(mouseLocation) {
+            // Click inside panel - activate selected app
+            if let selectedApp = panel.getSelectedApp() {
+                activateApp(selectedApp)
+            }
         }
+        // Click outside just dismisses without activating
         dismissPanel()
     }
 

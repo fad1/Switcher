@@ -61,11 +61,11 @@ Sources/SimpleSwitcher/
 - NSVisualEffectView with `.hudWindow` material (blur effect)
 - Centers on screen containing mouse cursor (multi-monitor support)
 - Manages selection state and app item views
-- **Dead zone hover**: Ignores mouse position when panel appears; hover only enabled after 25px mouse movement (prevents accidental selection)
+- **Dead zone hover**: Ignores mouse position when panel appears; hover only enabled after 3px mouse movement (prevents accidental selection)
 - Uses `mouseLocationOutsideOfEventStream` for accurate mouse position in non-activating panel
 
 **AppItemView.swift**
-- Displays app icon (64x64) and name (orange, truncated, 2 lines max)
+- Displays app icon (76x76, no label)
 - Selection highlight (white 30% alpha background)
 
 **PrivateAPIs.swift**
@@ -162,7 +162,7 @@ This creates `Switcher.app` which can be moved to `/Applications`.
 
 ## Mouse Behavior
 
-- **Hover**: Disabled until mouse moves 25+ pixels from initial position (prevents accidental selection when panel appears under cursor)
+- **Hover**: Disabled until mouse moves 3+ pixels from initial position (prevents accidental selection when panel appears under cursor)
 - **Click inside panel**: Activates the clicked app
 - **Click outside panel**: Dismisses without switching
 
