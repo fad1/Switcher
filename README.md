@@ -101,6 +101,10 @@ If you need window thumbnails, per-window switching, or extensive customization,
 
 If you want a Cmd+Tab that just works, try Switcher.
 
+## Support
+
+If you find Switcher useful, you can [buy me a coffee](https://ko-fi.com/cheetah9960).
+
 ## License
 
 MIT
