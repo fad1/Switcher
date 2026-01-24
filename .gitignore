@@ -17,3 +17,6 @@ DerivedData/
 AppIcon.icns
 .icon_generator
 .icon_generator.swift
+
+# Claude Code
+.claude/
