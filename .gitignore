@@ -1,0 +1,19 @@
+# Build artifacts
+.build/
+*.app
+
+# Xcode
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Generated files
+AppIcon.icns
+.icon_generator
+.icon_generator.swift
