@@ -27,7 +27,7 @@ class AppItemView: NSView {
         // Create name label
         nameLabel = NSTextField(labelWithString: appInfo.name)
         nameLabel.font = NSFont.systemFont(ofSize: 11)
-        nameLabel.textColor = .white
+        nameLabel.textColor = NSColor.orange
         nameLabel.alignment = .center
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.maximumNumberOfLines = 2

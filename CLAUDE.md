@@ -1,15 +1,15 @@
-# SimpleSwitcher
+# Switcher
 
 A minimal Cmd+Tab replacement for macOS. Shows only apps with visible windows, ordered by most recently used.
 
 ## Project Overview
 
-SimpleSwitcher intercepts the native Cmd+Tab hotkey and displays a custom switcher panel. It filters out:
+Switcher intercepts the native Cmd+Tab hotkey and displays a custom switcher panel. It filters out:
 - Hidden apps
 - Apps with only minimized windows
 - Background-only apps
 
-**Total codebase: ~850 lines across 7 Swift files**
+**Total codebase: ~900 lines across 7 Swift files**
 
 ## Architecture
 
@@ -35,7 +35,7 @@ Sources/SimpleSwitcher/
 - State machine: `idle` <-> `active`
 - Coordinates HotkeyManager and AppSwitcherPanel
 - Handles keyboard shortcuts (Tab, Shift, Arrows, H, Q, Escape, Return)
-- Handles mouse clicks (inside panel = activate, outside = dismiss)
+- Handles mouse clicks (inside panel = activate clicked app, outside = dismiss)
 
 **HotkeyManager.swift**
 - Registers Cmd+Tab globally at startup
@@ -61,10 +61,11 @@ Sources/SimpleSwitcher/
 - NSVisualEffectView with `.hudWindow` material (blur effect)
 - Centers on screen containing mouse cursor (multi-monitor support)
 - Manages selection state and app item views
+- **Dead zone hover**: Ignores mouse position when panel appears; hover only enabled after 25px mouse movement (prevents accidental selection)
+- Uses `mouseLocationOutsideOfEventStream` for accurate mouse position in non-activating panel
 
 **AppItemView.swift**
-- Displays app icon (64x64) and name (truncated, 2 lines max)
-- Mouse tracking for hover selection
+- Displays app icon (64x64) and name (orange, truncated, 2 lines max)
 - Selection highlight (white 30% alpha background)
 
 **PrivateAPIs.swift**
@@ -129,19 +130,21 @@ swift build -c release
 
 ### Create App Bundle
 ```bash
-# Debug build (default)
-./build-app.sh
+# Create icon (optional, uses ⌘ emoji by default)
+./create-icon.sh
+# Or with custom emoji:
+./create-icon.sh "🔀"
 
-# Release build (optimized)
+# Build app bundle
 swift build -c release
 ./build-app.sh release
 ```
-This creates `SimpleSwitcher.app` which can be moved to `/Applications`.
+This creates `Switcher.app` which can be moved to `/Applications`.
 
 ### Auto-Start at Login
-1. Move `SimpleSwitcher.app` to `/Applications`
+1. Move `Switcher.app` to `/Applications`
 2. Open System Settings > General > Login Items
-3. Click + and add SimpleSwitcher
+3. Click + and add Switcher
 
 ## Keyboard Shortcuts (while panel is open)
 
@@ -156,6 +159,12 @@ This creates `SimpleSwitcher.app` which can be moved to `/Applications`.
 | Return | Activate selected app |
 | Escape | Dismiss without switching |
 | Release Cmd | Activate selected app |
+
+## Mouse Behavior
+
+- **Hover**: Disabled until mouse moves 25+ pixels from initial position (prevents accidental selection when panel appears under cursor)
+- **Click inside panel**: Activates the clicked app
+- **Click outside panel**: Dismisses without switching
 
 ## Known Limitations
 
@@ -178,7 +187,7 @@ The CGEvent tap callback runs on a separate thread from the main UI thread. In r
 - [ ] Number keys (1-9) for quick selection
 - [ ] Window thumbnails (requires Screen Recording permission)
 - [ ] Preferences pane (configurable shortcuts, appearance)
-- [ ] Proper app icon
+- [x] App icon (via create-icon.sh)
 - [ ] Full code signing and notarization (currently ad-hoc signed)
 - [ ] Handle fullscreen apps better
 
@@ -189,6 +198,7 @@ The [AltTab](https://github.com/lwouis/alt-tab-macos) codebase (located at `/Use
 - Private API usage (`CGSSetSymbolicHotKeyEnabled`, etc.)
 - Window listing and filtering
 - macOS accessibility APIs
+- Dead zone hover pattern (`CursorEvents.swift`)
 
 Since Apple's documentation for these low-level APIs is sparse or nonexistent, AltTab's production code serves as practical documentation.
 

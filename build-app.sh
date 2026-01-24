@@ -6,7 +6,8 @@
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="SimpleSwitcher"
+BINARY_NAME="SimpleSwitcher"
+APP_NAME="Switcher"
 APP_BUNDLE="$PROJECT_DIR/$APP_NAME.app"
 
 # Use debug build by default (more reliable with event tap)
@@ -26,10 +27,10 @@ cd "$PROJECT_DIR"
 
 if [ "$BUILD_CONFIG" = "release" ]; then
     if swift build -c release 2>/dev/null; then
-        BINARY=".build/release/$APP_NAME"
+        BINARY=".build/release/$BINARY_NAME"
         echo "Release build successful"
-    elif [ -f ".build/release/$APP_NAME" ]; then
-        BINARY=".build/release/$APP_NAME"
+    elif [ -f ".build/release/$BINARY_NAME" ]; then
+        BINARY=".build/release/$BINARY_NAME"
         echo "Using existing release build"
     else
         echo "ERROR: Release build failed. Run 'swift build -c release' first."
@@ -37,10 +38,10 @@ if [ "$BUILD_CONFIG" = "release" ]; then
     fi
 else
     if swift build 2>/dev/null; then
-        BINARY=".build/debug/$APP_NAME"
+        BINARY=".build/debug/$BINARY_NAME"
         echo "Debug build successful"
-    elif [ -f ".build/debug/$APP_NAME" ]; then
-        BINARY=".build/debug/$APP_NAME"
+    elif [ -f ".build/debug/$BINARY_NAME" ]; then
+        BINARY=".build/debug/$BINARY_NAME"
         echo "Using existing debug build"
     else
         echo "ERROR: Debug build failed. Run 'swift build' first."
@@ -53,6 +54,14 @@ cp "$BINARY" "$APP_BUNDLE/Contents/MacOS/"
 
 # Copy Info.plist
 cp "$PROJECT_DIR/Info.plist" "$APP_BUNDLE/Contents/"
+
+# Copy icon if it exists
+if [ -f "$PROJECT_DIR/AppIcon.icns" ]; then
+    cp "$PROJECT_DIR/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/"
+    echo "Icon copied"
+else
+    echo "Note: No AppIcon.icns found. Run ./create-icon.sh to create one."
+fi
 
 # Create PkgInfo file
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"

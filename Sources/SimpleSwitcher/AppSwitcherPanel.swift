@@ -17,6 +17,7 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     private var isAllowedToMouseHover = false
     private var mouseMonitor: Any?
 
+    private let itemWidth: CGFloat = 80
     private let itemSpacing: CGFloat = 8
     private let panelPadding: CGFloat = 16
     private let deadZoneThreshold: CGFloat = 25  // Same as AltTab
@@ -102,7 +103,6 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         }
 
         // Update panel size
-        let itemWidth: CGFloat = 80
         let panelWidth = CGFloat(apps.count) * itemWidth + CGFloat(apps.count - 1) * itemSpacing + panelPadding * 2
         let panelHeight: CGFloat = 132
 
@@ -246,7 +246,6 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
 
         // Update panel size
         if !appViews.isEmpty {
-            let itemWidth: CGFloat = 80
             let panelWidth = CGFloat(appViews.count) * itemWidth + CGFloat(appViews.count - 1) * itemSpacing + panelPadding * 2
 
             var frame = self.frame
