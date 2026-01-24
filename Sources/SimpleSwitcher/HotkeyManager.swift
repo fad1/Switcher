@@ -218,6 +218,8 @@ class HotkeyManager {
                     DispatchQueue.main.async {
                         manager.delegate?.mouseClicked(at: location)
                     }
+                    // Consume the click - don't pass to underlying app
+                    return nil
                 }
             } else if type == .tapDisabledByUserInput || type == .tapDisabledByTimeout {
                 if let eventTap = manager.eventTap {
