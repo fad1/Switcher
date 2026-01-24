@@ -37,7 +37,13 @@ A fast, lightweight Cmd+Tab replacement for macOS. No bloat, no lag, no memory l
 
 ## Installation
 
-### Download
+### Homebrew (Recommended)
+```bash
+brew tap fad1/tap
+brew install --cask switcher
+```
+
+### Manual Download
 Grab `Switcher.app` from [Releases](../../releases) and move it to `/Applications`.
 
 ### Build from Source

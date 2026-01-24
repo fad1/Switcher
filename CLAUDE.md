@@ -182,6 +182,42 @@ The CGEvent tap callback runs on a separate thread from the main UI thread. In r
 2. State is set **synchronously** in event handlers, before any async delegate calls
 3. This ensures the event tap sees the correct state even with aggressive compiler optimizations
 
+## Releasing a New Version
+
+When creating a new release:
+
+1. **Build and create release zip:**
+```bash
+swift build -c release
+./create-icon.sh
+./build-app.sh release
+zip -r Switcher.zip Switcher.app
+```
+
+2. **Create GitHub release:**
+```bash
+gh release create v1.x.x Switcher.zip --title "Switcher v1.x.x" --notes "Release notes here"
+```
+
+3. **Update Homebrew tap:**
+```bash
+# Get SHA256 of new release
+curl -sL https://github.com/fad1/Switcher/releases/download/v1.x.x/Switcher.zip | shasum -a 256
+
+# Update tap repo at /Users/Shared/sv-fahd/homebrew-tap
+# Edit Casks/switcher.rb: update version and sha256
+cd /Users/Shared/sv-fahd/homebrew-tap
+# Update version and sha256 in Casks/switcher.rb
+git add . && git commit -m "Update Switcher to v1.x.x" && git push
+```
+
+4. **Clean up:**
+```bash
+rm Switcher.zip
+```
+
+**Homebrew tap repo:** https://github.com/fad1/homebrew-tap
+
 ## Potential Improvements
 
 - [ ] Number keys (1-9) for quick selection
