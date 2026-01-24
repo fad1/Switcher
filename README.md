@@ -19,7 +19,7 @@ A fast, lightweight Cmd+Tab replacement for macOS. No bloat, no lag, no memory l
 - ✅ Sorts by most recently used
 - ✅ Native macOS blur effect
 - ✅ Instant response (<16ms)
-- ✅ ~3MB memory footprint
+- ✅ ~30MB memory footprint
 - ✅ Zero background CPU when idle
 - ✅ Keyboard shortcuts: H to hide, Q to quit, Shift to go back
 - ✅ Mouse support: hover to select, click to activate
