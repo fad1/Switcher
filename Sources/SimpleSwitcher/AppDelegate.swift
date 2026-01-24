@@ -99,23 +99,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     func mouseClicked(at point: CGPoint) {
         guard state == .active else { return }
 
-        // CGEvent coordinates are in screen coordinate space
-        let screenPoint = NSPoint(x: point.x, y: point.y)
-
-        // Check if click is inside panel frame
-        if panel.frame.contains(screenPoint) {
-            // Click inside panel - use mouseLocationOutsideOfEventStream for accurate position
-            let windowPoint = panel.mouseLocationOutsideOfEventStream
-            if let clickedApp = panel.getAppAtPoint(windowPoint) {
-                activateApp(clickedApp)
-            } else if let selectedApp = panel.getSelectedApp() {
-                activateApp(selectedApp)
-            }
-            dismissPanel()
-        } else {
-            // Click outside - dismiss without switching
-            dismissPanel()
+        // Activate selected app and dismiss (hover already selected the right app)
+        if let selectedApp = panel.getSelectedApp() {
+            activateApp(selectedApp)
         }
+        dismissPanel()
     }
 
     func keyPressed(_ keyCode: UInt16) {

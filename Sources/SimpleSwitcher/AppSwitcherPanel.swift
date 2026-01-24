@@ -17,10 +17,10 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     private var isAllowedToMouseHover = false
     private var mouseMonitor: Any?
 
-    private let itemWidth: CGFloat = 80
-    private let itemSpacing: CGFloat = 8
-    private let panelPadding: CGFloat = 16
-    private let deadZoneThreshold: CGFloat = 25  // Same as AltTab
+    private let itemSize: CGFloat = 76
+    private let itemSpacing: CGFloat = 0
+    private let panelPadding: CGFloat = 10
+    private let deadZoneThreshold: CGFloat = 3
 
     init() {
         super.init(
@@ -103,8 +103,8 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         }
 
         // Update panel size
-        let panelWidth = CGFloat(apps.count) * itemWidth + CGFloat(apps.count - 1) * itemSpacing + panelPadding * 2
-        let panelHeight: CGFloat = 132
+        let panelWidth = CGFloat(apps.count) * itemSize + CGFloat(apps.count - 1) * itemSpacing + panelPadding * 2
+        let panelHeight: CGFloat = itemSize + panelPadding * 2
 
         // Find screen containing mouse cursor
         let mouseLocation = NSEvent.mouseLocation
@@ -170,7 +170,8 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         let windowPoint = mouseLocationOutsideOfEventStream
 
         for (index, view) in appViews.enumerated() {
-            let viewFrame = view.convert(view.bounds, to: visualEffectView)
+            // Convert view bounds to window coordinates
+            let viewFrame = view.convert(view.bounds, to: nil)
             if viewFrame.contains(windowPoint) {
                 if selectedIndex != index {
                     selectedIndex = index
@@ -183,7 +184,8 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
 
     func getAppAtPoint(_ windowPoint: NSPoint) -> AppInfo? {
         for view in appViews {
-            let viewFrame = view.convert(view.bounds, to: visualEffectView)
+            // Convert view bounds to window coordinates
+            let viewFrame = view.convert(view.bounds, to: nil)
             if viewFrame.contains(windowPoint) {
                 return view.appInfo
             }
@@ -246,7 +248,7 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
 
         // Update panel size
         if !appViews.isEmpty {
-            let panelWidth = CGFloat(appViews.count) * itemWidth + CGFloat(appViews.count - 1) * itemSpacing + panelPadding * 2
+            let panelWidth = CGFloat(appViews.count) * itemSize + CGFloat(appViews.count - 1) * itemSpacing + panelPadding * 2
 
             var frame = self.frame
             let centerX = frame.midX

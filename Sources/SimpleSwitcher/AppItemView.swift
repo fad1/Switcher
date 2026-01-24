@@ -9,12 +9,10 @@ class AppItemView: NSView {
 
     let appInfo: AppInfo
     private let iconImageView: NSImageView
-    private let nameLabel: NSTextField
     private var isSelected = false
 
-    private let itemWidth: CGFloat = 80
-    private let itemHeight: CGFloat = 100
-    private let iconSize: CGFloat = 64
+    private let itemSize: CGFloat = 76
+    private let iconSize: CGFloat = 76
 
     init(appInfo: AppInfo) {
         self.appInfo = appInfo
@@ -24,15 +22,7 @@ class AppItemView: NSView {
         iconImageView.image = appInfo.icon
         iconImageView.imageScaling = .scaleProportionallyUpOrDown
 
-        // Create name label
-        nameLabel = NSTextField(labelWithString: appInfo.name)
-        nameLabel.font = NSFont.systemFont(ofSize: 11)
-        nameLabel.textColor = NSColor.orange
-        nameLabel.alignment = .center
-        nameLabel.lineBreakMode = .byTruncatingTail
-        nameLabel.maximumNumberOfLines = 2
-
-        super.init(frame: NSRect(x: 0, y: 0, width: itemWidth, height: itemHeight))
+        super.init(frame: NSRect(x: 0, y: 0, width: itemSize, height: itemSize))
 
         setupViews()
         setupTrackingArea()
@@ -50,25 +40,16 @@ class AppItemView: NSView {
         iconImageView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconImageView)
 
-        // Add label
-        nameLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(nameLabel)
-
         NSLayoutConstraint.activate([
-            // Icon constraints
-            iconImageView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            // Icon centered in view
             iconImageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            iconImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconImageView.widthAnchor.constraint(equalToConstant: iconSize),
             iconImageView.heightAnchor.constraint(equalToConstant: iconSize),
 
-            // Label constraints
-            nameLabel.topAnchor.constraint(equalTo: iconImageView.bottomAnchor, constant: 4),
-            nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            nameLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-
             // Self constraints
-            widthAnchor.constraint(equalToConstant: itemWidth),
-            heightAnchor.constraint(equalToConstant: itemHeight)
+            widthAnchor.constraint(equalToConstant: itemSize),
+            heightAnchor.constraint(equalToConstant: itemSize)
         ])
     }
 
