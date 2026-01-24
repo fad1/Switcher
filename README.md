@@ -33,7 +33,7 @@ A fast, lightweight Cmd+Tab replacement for macOS. No bloat, no lag, no memory l
 - ❌ Themes or customization
 - ❌ Anything else
 
-**This is intentional.** Switcher is finished software. It does one thing and does it correctly. No feature creep, no updates that break things, no growing complexity.
+**This is intentional.** Switcher does one thing and does it well.
 
 ## Installation
 
