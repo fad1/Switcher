@@ -15,20 +15,20 @@ A fast, lightweight Cmd+Tab replacement for macOS. No bloat, no lag, no memory l
 
 ## What Switcher Does
 
-✅ Shows only apps with visible windows (no hidden/minimized clutter)
-✅ Sorts by most recently used
-✅ Native macOS blur effect
-✅ Instant response (<16ms)
-✅ ~3MB memory footprint
-✅ Zero background CPU when idle
+- ✅ Shows only apps with visible windows (no hidden/minimized clutter)
+- ✅ Sorts by most recently used
+- ✅ Native macOS blur effect
+- ✅ Instant response (<16ms)
+- ✅ ~3MB memory footprint
+- ✅ Zero background CPU when idle
 
 ## What Switcher Doesn't Do
 
-❌ Window thumbnails (requires Screen Recording permission)
-❌ Per-window switching
-❌ Preferences UI
-❌ Themes or customization
-❌ Anything else
+- ❌ Window thumbnails (requires Screen Recording permission)
+- ❌ Per-window switching
+- ❌ Preferences UI
+- ❌ Themes or customization
+- ❌ Anything else
 
 **This is intentional.** Switcher is finished software. It does one thing and does it correctly. No feature creep, no updates that break things, no growing complexity.
 
