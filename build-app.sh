@@ -57,6 +57,11 @@ cp "$PROJECT_DIR/Info.plist" "$APP_BUNDLE/Contents/"
 # Create PkgInfo file
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 
+# Ad-hoc code sign the app bundle
+echo "Code signing..."
+codesign --force --deep --sign - "$APP_BUNDLE"
+echo "Code signing complete"
+
 echo ""
 echo "Build complete: $APP_BUNDLE"
 echo ""

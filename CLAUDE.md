@@ -34,15 +34,19 @@ Sources/SimpleSwitcher/
 **AppDelegate.swift**
 - State machine: `idle` <-> `active`
 - Coordinates HotkeyManager and AppSwitcherPanel
-- Handles keyboard shortcuts (Tab, Shift, Arrows, H, Escape, Return)
+- Handles keyboard shortcuts (Tab, Shift, Arrows, H, Q, Escape, Return)
 - Handles mouse clicks (inside panel = activate, outside = dismiss)
 
 **HotkeyManager.swift**
-- Registers Cmd+Tab using Carbon's RegisterEventHotKey API
+- Registers Cmd+Tab globally at startup
+- Dynamically registers/unregisters other hotkeys (H, Q, arrows, Escape, Return) when panel is shown/hidden
+  - `registerActiveHotkeys()` called when panel opens
+  - `unregisterActiveHotkeys()` called when panel closes
+  - This ensures Cmd+H/Q work normally in other apps when panel is not showing
 - Creates CGEvent tap to monitor:
   - flagsChanged: Detect Cmd release (dismiss), Shift press (previous)
-  - keyDown: Forward to delegate, block when active
   - mouseDown: Forward click location to delegate
+- **Note**: Uses Carbon hotkeys instead of CGEvent keyDown to avoid requiring Input Monitoring permission (only Accessibility needed)
 - **Thread safety**: Uses `DispatchQueue` for synchronized access to `isActive` state
 - **Critical**: Sets `isActive` synchronously in event handlers before async delegate calls to avoid race conditions in release builds
 
@@ -101,10 +105,12 @@ Sources/SimpleSwitcher/
 
 ## Permissions Required
 
-**Input Monitoring** (System Settings > Privacy & Security > Input Monitoring)
-- Required for CGEvent tap to work
-- Without this, event tap creation fails and hotkeys won't work
+**Accessibility** (System Settings > Privacy & Security > Accessibility)
+- Required for CGEvent tap to detect modifier key changes (Cmd release, Shift press)
+- Without this, event tap creation fails
 - App prompts user on first launch
+
+**Note**: Input Monitoring is NOT required because keyboard shortcuts use Carbon hotkeys (RegisterEventHotKey) instead of CGEvent keyDown monitoring.
 
 ## Build & Run
 
@@ -146,6 +152,7 @@ This creates `SimpleSwitcher.app` which can be moved to `/Applications`.
 | Left Arrow | Select previous app |
 | Right Arrow | Select next app |
 | H | Hide selected app |
+| Q | Quit selected app |
 | Return | Activate selected app |
 | Escape | Dismiss without switching |
 | Release Cmd | Activate selected app |
@@ -155,7 +162,7 @@ This creates `SimpleSwitcher.app` which can be moved to `/Applications`.
 1. **No window thumbnails** - Would require Screen Recording permission
 2. **No per-window switching** - Shows apps, not individual windows
 3. **No preferences UI** - Configuration requires code changes
-4. **Not code-signed** - May trigger Gatekeeper on first run
+4. **Ad-hoc signed only** - Not notarized, may trigger Gatekeeper warning on first run
 5. **Private API usage** - CGSSetSymbolicHotKeyEnabled may break in future macOS
 
 ## Threading Notes
@@ -168,12 +175,11 @@ The CGEvent tap callback runs on a separate thread from the main UI thread. In r
 
 ## Potential Improvements
 
-- [ ] Q key to quit selected app
 - [ ] Number keys (1-9) for quick selection
 - [ ] Window thumbnails (requires Screen Recording permission)
 - [ ] Preferences pane (configurable shortcuts, appearance)
 - [ ] Proper app icon
-- [ ] Code signing and notarization
+- [ ] Full code signing and notarization (currently ad-hoc signed)
 - [ ] Handle fullscreen apps better
 
 ## References
@@ -189,7 +195,7 @@ Since Apple's documentation for these low-level APIs is sparse or nonexistent, A
 ## Troubleshooting
 
 ### "Failed to create event tap"
-Grant Input Monitoring permission in System Settings > Privacy & Security > Input Monitoring. May need to remove and re-add the app if permissions changed.
+Grant Accessibility permission in System Settings > Privacy & Security > Accessibility. May need to remove and re-add the app if permissions changed or app was rebuilt.
 
 ### Native Cmd+Tab still works
 The app may have crashed without restoring the hotkey. Run the app again and quit cleanly, or log out/restart.

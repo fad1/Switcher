@@ -12,8 +12,14 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     private var selectedIndex: Int = 0
     private var visualEffectView: NSVisualEffectView!
 
+    // Dead zone for hover - like AltTab's CursorEvents
+    private var deadZoneInitialPosition: NSPoint?
+    private var isAllowedToMouseHover = false
+    private var mouseMonitor: Any?
+
     private let itemSpacing: CGFloat = 8
     private let panelPadding: CGFloat = 16
+    private let deadZoneThreshold: CGFloat = 25  // Same as AltTab
 
     init() {
         super.init(
@@ -117,10 +123,85 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
             updateSelection()
         }
 
+        // Reset dead zone - hover will be enabled after mouse moves 25+ pixels
+        deadZoneInitialPosition = nil
+        isAllowedToMouseHover = false
+        startMouseMonitor()
+
         orderFront(nil)
     }
 
+    private func startMouseMonitor() {
+        stopMouseMonitor()
+
+        // Single global monitor for mouse movement
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            self?.handleMouseMoved()
+        }
+    }
+
+    private func handleMouseMoved() {
+        let currentPos = NSEvent.mouseLocation
+
+        // Dead zone logic (like AltTab's CursorEvents)
+        if !isAllowedToMouseHover {
+            if deadZoneInitialPosition == nil {
+                deadZoneInitialPosition = currentPos
+                return
+            }
+            let dx = currentPos.x - deadZoneInitialPosition!.x
+            let dy = currentPos.y - deadZoneInitialPosition!.y
+            let distance = hypot(dx, dy)
+            if distance > deadZoneThreshold {
+                isAllowedToMouseHover = true
+            } else {
+                return
+            }
+        }
+
+        // Hover enabled - update selection if mouse is over panel
+        if frame.contains(currentPos) {
+            selectAppUnderMouse()
+        }
+    }
+
+    private func selectAppUnderMouse() {
+        // Use mouseLocationOutsideOfEventStream for accurate position in non-activating panel
+        let windowPoint = mouseLocationOutsideOfEventStream
+
+        for (index, view) in appViews.enumerated() {
+            let viewFrame = view.convert(view.bounds, to: visualEffectView)
+            if viewFrame.contains(windowPoint) {
+                if selectedIndex != index {
+                    selectedIndex = index
+                    updateSelection()
+                }
+                return
+            }
+        }
+    }
+
+    func getAppAtPoint(_ windowPoint: NSPoint) -> AppInfo? {
+        for view in appViews {
+            let viewFrame = view.convert(view.bounds, to: visualEffectView)
+            if viewFrame.contains(windowPoint) {
+                return view.appInfo
+            }
+        }
+        return nil
+    }
+
+    private func stopMouseMonitor() {
+        if let monitor = mouseMonitor {
+            NSEvent.removeMonitor(monitor)
+            mouseMonitor = nil
+        }
+    }
+
     func hidePanel() {
+        stopMouseMonitor()
+        deadZoneInitialPosition = nil
+        isAllowedToMouseHover = false
         orderOut(nil)
     }
 
@@ -146,6 +227,10 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
 
         let removedApp = appViews[selectedIndex].appInfo
         let removedView = appViews[selectedIndex]
+
+        // Temporarily disable hover during removal (panel resize can trigger mouseEntered)
+        let wasAllowed = isAllowedToMouseHover
+        isAllowedToMouseHover = false
 
         // Remove view
         stackView.removeArrangedSubview(removedView)
@@ -173,6 +258,11 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
             updateSelection()
         }
 
+        // Restore hover state after a brief delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.isAllowedToMouseHover = wasAllowed
+        }
+
         return removedApp
     }
 
@@ -191,6 +281,7 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     // MARK: - AppItemViewDelegate
 
     func appItemHovered(_ view: AppItemView) {
+        guard isAllowedToMouseHover else { return }
         if let index = appViews.firstIndex(where: { $0 === view }) {
             selectedIndex = index
             updateSelection()

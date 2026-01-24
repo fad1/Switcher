@@ -20,6 +20,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     private let kVK_LeftArrow: UInt16 = 0x7B
     private let kVK_RightArrow: UInt16 = 0x7C
     private let kVK_H: UInt16 = 0x04
+    private let kVK_Q: UInt16 = 0x0C
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Start tracking app activation order
@@ -54,8 +55,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     func hotkeyTriggered() {
         // HotkeyManager already set isActive = true
         guard state == .idle else {
-            // Already active - Tab handling is done in keyPressed()
-            // Keep isActive = true since we're still active
+            // Already active - Cmd+Tab pressed again, select next app
+            panel.selectNext()
             return
         }
 
@@ -74,6 +75,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         panel.showWithApps(currentApps, selectIndex: selectIndex)
 
         state = .active
+        // Register active-only hotkeys (H, Q, arrows, etc.)
+        hotkeyManager.registerActiveHotkeys()
         // isActive already set by HotkeyManager
     }
 
@@ -96,14 +99,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     func mouseClicked(at point: CGPoint) {
         guard state == .active else { return }
 
-        // Convert CGEvent coordinates (bottom-left origin) to screen coordinates
-        // and check if click is inside the panel
+        // CGEvent coordinates are in screen coordinate space
         let screenPoint = NSPoint(x: point.x, y: point.y)
 
         // Check if click is inside panel frame
         if panel.frame.contains(screenPoint) {
-            // Click inside panel - let the panel handle it (hover already selects, click activates)
-            if let selectedApp = panel.getSelectedApp() {
+            // Click inside panel - use mouseLocationOutsideOfEventStream for accurate position
+            let windowPoint = panel.mouseLocationOutsideOfEventStream
+            if let clickedApp = panel.getAppAtPoint(windowPoint) {
+                activateApp(clickedApp)
+            } else if let selectedApp = panel.getSelectedApp() {
                 activateApp(selectedApp)
             }
             dismissPanel()
@@ -138,6 +143,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         case kVK_H:
             hideSelectedApp()
 
+        case kVK_Q:
+            quitSelectedApp()
+
         default:
             break
         }
@@ -171,9 +179,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         }
     }
 
+    private func quitSelectedApp() {
+        guard let appToQuit = panel.removeSelectedApp() else { return }
+
+        // Terminate the app
+        appToQuit.app.terminate()
+
+        // Remove from our list
+        currentApps.removeAll { $0.pid == appToQuit.pid }
+
+        // If no more apps, dismiss
+        if !panel.hasApps {
+            dismissPanel()
+        }
+    }
+
     private func dismissPanel() {
         panel.hidePanel()
         state = .idle
         hotkeyManager.isActive = false
+        // Unregister active-only hotkeys so Cmd+H/Q work in other apps
+        hotkeyManager.unregisterActiveHotkeys()
     }
 }

@@ -16,8 +16,9 @@ class HotkeyManager {
         "smpl".utf16.reduce(0) { ($0 << 8) + OSType($1) }
     }()
 
-    private var hotKeyRef: EventHotKeyRef?
     private var hotKeyPressedHandler: EventHandlerRef?
+    private var tabHotKeyRef: EventHotKeyRef?
+    private var activeHotKeyRefs: [EventHotKeyRef?] = []
     private var eventTap: CFMachPort?
 
     // Serial queue for thread-safe state access
@@ -37,16 +38,43 @@ class HotkeyManager {
         set { stateQueue.sync { _shiftWasDown = newValue } }
     }
 
+    // Hotkey IDs - using actual key codes for easy mapping
+    private enum HotkeyID: UInt32 {
+        case tab = 1        // Cmd+Tab - activate/next
+        case h = 2          // Cmd+H - hide
+        case q = 3          // Cmd+Q - quit
+        case leftArrow = 4  // Cmd+Left - previous
+        case rightArrow = 5 // Cmd+Right - next
+        case escape = 6     // Cmd+Escape - dismiss
+        case returnKey = 7  // Cmd+Return - activate
+    }
+
+    // Map hotkey IDs to key codes for delegate
+    private static let hotkeyToKeyCode: [UInt32: UInt16] = [
+        HotkeyID.tab.rawValue: UInt16(kVK_Tab),
+        HotkeyID.h.rawValue: UInt16(kVK_ANSI_H),
+        HotkeyID.q.rawValue: UInt16(kVK_ANSI_Q),
+        HotkeyID.leftArrow.rawValue: UInt16(kVK_LeftArrow),
+        HotkeyID.rightArrow.rawValue: UInt16(kVK_RightArrow),
+        HotkeyID.escape.rawValue: UInt16(kVK_Escape),
+        HotkeyID.returnKey.rawValue: UInt16(kVK_Return),
+    ]
+
     func start() {
-        registerCmdTabHotkey()
+        registerHotkeys()
         setupEventTap()
     }
 
     func stop() {
-        if let hotKeyRef = hotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
-            self.hotKeyRef = nil
+        // Unregister tab hotkey
+        if let ref = tabHotKeyRef {
+            UnregisterEventHotKey(ref)
+            tabHotKeyRef = nil
         }
+
+        // Unregister active hotkeys
+        unregisterActiveHotkeys()
+
         if let handler = hotKeyPressedHandler {
             RemoveEventHandler(handler)
             hotKeyPressedHandler = nil
@@ -57,9 +85,42 @@ class HotkeyManager {
         }
     }
 
-    // MARK: - Cmd+Tab Hotkey Registration (Carbon)
+    /// Register hotkeys that only work when panel is active (Cmd+H, Cmd+Q, etc.)
+    func registerActiveHotkeys() {
+        guard activeHotKeyRefs.isEmpty else { return }
 
-    private func registerCmdTabHotkey() {
+        let eventTarget = GetEventDispatcherTarget()
+
+        let hotkeys: [(HotkeyID, Int)] = [
+            (.h, kVK_ANSI_H),
+            (.q, kVK_ANSI_Q),
+            (.leftArrow, kVK_LeftArrow),
+            (.rightArrow, kVK_RightArrow),
+            (.escape, kVK_Escape),
+            (.returnKey, kVK_Return),
+        ]
+
+        for (hotkeyID, keyCode) in hotkeys {
+            var ref: EventHotKeyRef?
+            let id = EventHotKeyID(signature: HotkeyManager.signature, id: hotkeyID.rawValue)
+            RegisterEventHotKey(UInt32(keyCode), UInt32(cmdKey), id, eventTarget, UInt32(kEventHotKeyNoOptions), &ref)
+            activeHotKeyRefs.append(ref)
+        }
+    }
+
+    /// Unregister active-only hotkeys so they work normally in other apps
+    func unregisterActiveHotkeys() {
+        for ref in activeHotKeyRefs {
+            if let ref = ref {
+                UnregisterEventHotKey(ref)
+            }
+        }
+        activeHotKeyRefs.removeAll()
+    }
+
+    // MARK: - Carbon Hotkey Registration
+
+    private func registerHotkeys() {
         let eventTarget = GetEventDispatcherTarget()
 
         var eventTypes = [EventTypeSpec(
@@ -81,10 +142,20 @@ class HotkeyManager {
 
             if let userData = userData {
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
-                // Set active immediately so event tap knows to block events
-                manager.isActive = true
-                DispatchQueue.main.async {
-                    manager.delegate?.hotkeyTriggered()
+
+                if id.id == HotkeyID.tab.rawValue {
+                    // Cmd+Tab - activate switcher or select next
+                    manager.isActive = true
+                    DispatchQueue.main.async {
+                        manager.delegate?.hotkeyTriggered()
+                    }
+                } else {
+                    // Other hotkeys (H, Q, arrows, etc.) - only registered when active
+                    if let keyCode = HotkeyManager.hotkeyToKeyCode[id.id] {
+                        DispatchQueue.main.async {
+                            manager.delegate?.keyPressed(keyCode)
+                        }
+                    }
                 }
             }
             return noErr
@@ -93,19 +164,18 @@ class HotkeyManager {
         let userDataPtr = Unmanaged.passUnretained(self).toOpaque()
         InstallEventHandler(eventTarget, handler, eventTypes.count, &eventTypes, userDataPtr, &hotKeyPressedHandler)
 
-        // Register Cmd+Tab hotkey
-        let hotkeyId = EventHotKeyID(signature: HotkeyManager.signature, id: 1)
-        let keyCode = UInt32(kVK_Tab)
-        let modifiers = UInt32(cmdKey)
-        RegisterEventHotKey(keyCode, modifiers, hotkeyId, eventTarget, UInt32(kEventHotKeyNoOptions), &hotKeyRef)
+        // Only register Cmd+Tab at startup - other hotkeys registered when panel is active
+        let id = EventHotKeyID(signature: HotkeyManager.signature, id: HotkeyID.tab.rawValue)
+        RegisterEventHotKey(UInt32(kVK_Tab), UInt32(cmdKey), id, eventTarget, UInt32(kEventHotKeyNoOptions), &tabHotKeyRef)
     }
 
-    // MARK: - Event Tap (for modifier release + key events while panel is shown)
+    // MARK: - Event Tap (for modifier release and mouse clicks only)
+    // Note: keyDown removed - using Carbon hotkeys instead (only requires Accessibility permission)
 
     private func setupEventTap() {
-        // Listen for flagsChanged, keyDown, and mouse clicks
+        // Only listen for flagsChanged and mouse clicks
+        // keyDown events require Input Monitoring permission, so we use Carbon hotkeys instead
         let eventMask = (1 << CGEventType.flagsChanged.rawValue) |
-                        (1 << CGEventType.keyDown.rawValue) |
                         (1 << CGEventType.leftMouseDown.rawValue) |
                         (1 << CGEventType.rightMouseDown.rawValue)
 
@@ -142,17 +212,6 @@ class HotkeyManager {
                         manager.delegate?.modifierKeyReleased()
                     }
                 }
-            } else if type == .keyDown {
-                // Check active state first
-                let active = manager.isActive
-                if active {
-                    let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-                    DispatchQueue.main.async {
-                        manager.delegate?.keyPressed(keyCode)
-                    }
-                    // Block key event from reaching other apps
-                    return nil
-                }
             } else if type == .leftMouseDown || type == .rightMouseDown {
                 if manager.isActive {
                     let location = event.location
@@ -186,7 +245,7 @@ class HotkeyManager {
             CGEvent.tapEnable(tap: eventTap, enable: true)
             print("Event tap created successfully")
         } else {
-            print("ERROR: Failed to create event tap. Grant Input Monitoring permission in System Settings > Privacy & Security > Input Monitoring")
+            print("ERROR: Failed to create event tap. Grant Accessibility permission in System Settings > Privacy & Security > Accessibility")
         }
     }
 }
