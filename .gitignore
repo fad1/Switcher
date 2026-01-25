@@ -20,3 +20,6 @@ AppIcon.icns
 
 # Claude Code
 .claude/
+
+# Release script (local only)
+release.sh
