@@ -53,6 +53,17 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         visualEffectView.wantsLayer = true
         visualEffectView.maskImage = maskImage(cornerRadius: 16)
 
+        // Add darkening overlay for light mode (transparent in dark mode)
+        let darkeningView = AppearanceAdaptiveView()
+        darkeningView.translatesAutoresizingMaskIntoConstraints = false
+        visualEffectView.addSubview(darkeningView)
+        NSLayoutConstraint.activate([
+            darkeningView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor),
+            darkeningView.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor),
+            darkeningView.topAnchor.constraint(equalTo: visualEffectView.topAnchor),
+            darkeningView.bottomAnchor.constraint(equalTo: visualEffectView.bottomAnchor)
+        ])
+
         contentView = visualEffectView
     }
 
@@ -287,5 +298,27 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
             selectedIndex = index
             updateSelection()
         }
+    }
+}
+
+// MARK: - Appearance Adaptive View
+
+/// A view that darkens the background in light mode only
+private class AppearanceAdaptiveView: NSView {
+    override var wantsUpdateLayer: Bool { true }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+    }
+
+    override func updateLayer() {
+        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        layer?.backgroundColor = isDark ? nil : NSColor.black.withAlphaComponent(0.35).cgColor
     }
 }
