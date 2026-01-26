@@ -60,7 +60,8 @@ Sources/SimpleSwitcher/
 - NSPanel with `.nonactivatingPanel` style (doesn't steal focus)
 - NSVisualEffectView with `.hudWindow` material (blur effect)
 - Centers on screen containing mouse cursor (multi-monitor support)
-- Manages selection state and app item views
+- **Multi-row layout**: Uses max 85% of screen width; wraps to additional rows when many apps are open
+- Manages selection state with row/column tracking for grid navigation
 - **Dead zone hover**: Ignores mouse position when panel appears; hover only enabled after 3px mouse movement (prevents accidental selection)
 - Uses `mouseLocationOutsideOfEventStream` for accurate mouse position in non-activating panel
 
@@ -154,6 +155,8 @@ This creates `Switcher.app` which can be moved to `/Applications`.
 | Shift | Select previous app |
 | Left Arrow | Select previous app |
 | Right Arrow | Select next app |
+| Up Arrow | Select app in row above (multi-row only) |
+| Down Arrow | Select app in row below (multi-row only) |
 | H | Hide selected app |
 | Q | Quit selected app |
 | Return | Activate selected app |
