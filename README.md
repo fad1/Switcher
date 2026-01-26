@@ -56,9 +56,15 @@ swift build -c release
 ```
 
 ### First Run
-1. Open Switcher.app
-2. Grant **Accessibility** permission when prompted (System Settings → Privacy & Security → Accessibility)
-3. Press Cmd+Tab — that's it
+
+**Important:** Grant Accessibility permission *before* launching Switcher for the first time.
+
+1. Open **System Settings → Privacy & Security → Accessibility**
+2. Click the **+** button and add Switcher.app
+3. Now open Switcher.app
+4. Press Cmd+Tab — that's it
+
+> **Why?** If you launch first and grant permission via the macOS prompt, the app may hang. You'd need to remove it from Accessibility, quit the app, re-add it, then relaunch.
 
 ### Auto-Start
 System Settings → General → Login Items → add Switcher
@@ -69,7 +75,8 @@ System Settings → General → Login Items → add Switcher
 |-----|--------|
 | Cmd+Tab | Open switcher / next app |
 | Shift | Previous app |
-| ←/→ | Navigate |
+| ←/→ | Navigate left/right |
+| ↑/↓ | Navigate up/down (when multiple rows) |
 | H | Hide selected app |
 | Q | Quit selected app |
 | Return | Activate |
