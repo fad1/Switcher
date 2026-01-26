@@ -66,6 +66,12 @@ swift build -c release
 
 > **Why?** If you launch first and grant permission via the macOS prompt, the app may hang. You'd need to remove it from Accessibility, quit the app, re-add it, then relaunch.
 
+### Removing Permissions
+
+**Never remove Switcher from Accessibility while it's running.** Always quit the app first (use Activity Monitor if needed).
+
+> **Why?** This is a [known macOS bug](https://developer.apple.com/forums/thread/735204): removing Accessibility permission from an app using CGEventTap while it's running can block mouse clicks system-wide, requiring a restart to fix.
+
 ### Auto-Start
 System Settings → General → Login Items → add Switcher
 
