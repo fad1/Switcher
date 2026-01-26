@@ -8,8 +8,10 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     weak var panelDelegate: AppSwitcherPanelDelegate?
 
     private var appViews: [AppItemView] = []
-    private var stackView: NSStackView!
-    private var selectedIndex: Int = 0
+    private var rows: [[AppItemView]] = []  // Grid layout: rows of app views
+    private var verticalStackView: NSStackView!  // Contains row stack views
+    private var selectedRow: Int = 0
+    private var selectedColumn: Int = 0
     private var visualEffectView: NSVisualEffectView!
 
     // Dead zone for hover - like AltTab's CursorEvents
@@ -19,8 +21,10 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
 
     private let itemSize: CGFloat = 76
     private let itemSpacing: CGFloat = 0
+    private let rowSpacing: CGFloat = 4
     private let panelPadding: CGFloat = 10
     private let deadZoneThreshold: CGFloat = 3
+    private let screenMarginPercent: CGFloat = 0.85  // Use max 85% of screen width
 
     init() {
         super.init(
@@ -82,19 +86,19 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     }
 
     private func setupStackView() {
-        stackView = NSStackView()
-        stackView.orientation = .horizontal
-        stackView.spacing = itemSpacing
-        stackView.alignment = .centerY
-        stackView.translatesAutoresizingMaskIntoConstraints = false
+        verticalStackView = NSStackView()
+        verticalStackView.orientation = .vertical
+        verticalStackView.spacing = rowSpacing
+        verticalStackView.alignment = .centerX
+        verticalStackView.translatesAutoresizingMaskIntoConstraints = false
 
-        visualEffectView.addSubview(stackView)
+        visualEffectView.addSubview(verticalStackView)
 
         NSLayoutConstraint.activate([
-            stackView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: panelPadding),
-            stackView.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -panelPadding),
-            stackView.topAnchor.constraint(equalTo: visualEffectView.topAnchor, constant: panelPadding),
-            stackView.bottomAnchor.constraint(equalTo: visualEffectView.bottomAnchor, constant: -panelPadding)
+            verticalStackView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: panelPadding),
+            verticalStackView.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -panelPadding),
+            verticalStackView.topAnchor.constraint(equalTo: visualEffectView.topAnchor, constant: panelPadding),
+            verticalStackView.bottomAnchor.constraint(equalTo: visualEffectView.bottomAnchor, constant: -panelPadding)
         ])
     }
 
@@ -104,42 +108,92 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         // Clear existing views
         appViews.forEach { $0.removeFromSuperview() }
         appViews.removeAll()
+        rows.removeAll()
 
-        // Create new views
-        for app in apps {
-            let itemView = AppItemView(appInfo: app)
-            itemView.delegate = self
-            appViews.append(itemView)
-            stackView.addArrangedSubview(itemView)
+        // Clear existing row stack views
+        for subview in verticalStackView.arrangedSubviews {
+            verticalStackView.removeArrangedSubview(subview)
+            subview.removeFromSuperview()
         }
-
-        // Update panel size
-        let panelWidth = CGFloat(apps.count) * itemSize + CGFloat(apps.count - 1) * itemSpacing + panelPadding * 2
-        let panelHeight: CGFloat = itemSize + panelPadding * 2
 
         // Find screen containing mouse cursor
         let mouseLocation = NSEvent.mouseLocation
         let targetScreen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens.first!
+        let screenFrame = targetScreen.visibleFrame
+
+        // Calculate max items per row based on screen width
+        let maxPanelWidth = screenFrame.width * screenMarginPercent
+        let availableWidth = maxPanelWidth - panelPadding * 2
+        let itemsPerRow = max(1, Int(floor((availableWidth + itemSpacing) / (itemSize + itemSpacing))))
+
+        // Create app views and organize into rows
+        var currentRow: [AppItemView] = []
+        var currentRowStackView = createRowStackView()
+
+        for (index, app) in apps.enumerated() {
+            let itemView = AppItemView(appInfo: app)
+            itemView.delegate = self
+            appViews.append(itemView)
+            currentRow.append(itemView)
+            currentRowStackView.addArrangedSubview(itemView)
+
+            // Start new row if current row is full
+            if currentRow.count >= itemsPerRow && index < apps.count - 1 {
+                rows.append(currentRow)
+                verticalStackView.addArrangedSubview(currentRowStackView)
+                currentRow = []
+                currentRowStackView = createRowStackView()
+            }
+        }
+
+        // Add final row if it has items
+        if !currentRow.isEmpty {
+            rows.append(currentRow)
+            verticalStackView.addArrangedSubview(currentRowStackView)
+        }
+
+        // Calculate panel size
+        let rowCount = rows.count
+        let maxRowCount = rows.map { $0.count }.max() ?? 1
+        let panelWidth = CGFloat(maxRowCount) * itemSize + CGFloat(maxRowCount - 1) * itemSpacing + panelPadding * 2
+        let panelHeight = CGFloat(rowCount) * itemSize + CGFloat(rowCount - 1) * rowSpacing + panelPadding * 2
 
         // Center panel on target screen
-        let screenFrame = targetScreen.visibleFrame
         let panelX = screenFrame.midX - panelWidth / 2
         let panelY = screenFrame.midY - panelHeight / 2
 
         setFrame(NSRect(x: panelX, y: panelY, width: panelWidth, height: panelHeight), display: true)
 
-        // Select initial app
-        selectedIndex = min(selectIndex, apps.count - 1)
-        if selectedIndex >= 0 && selectedIndex < appViews.count {
+        // Select initial app (convert flat index to row/column)
+        let adjustedIndex = min(selectIndex, apps.count - 1)
+        if adjustedIndex >= 0 {
+            selectedRow = adjustedIndex / itemsPerRow
+            selectedColumn = adjustedIndex % itemsPerRow
+            // Clamp to valid range for last row
+            if selectedRow >= rows.count {
+                selectedRow = rows.count - 1
+                selectedColumn = rows[selectedRow].count - 1
+            } else if selectedColumn >= rows[selectedRow].count {
+                selectedColumn = rows[selectedRow].count - 1
+            }
             updateSelection()
         }
 
-        // Reset dead zone - hover will be enabled after mouse moves 25+ pixels
+        // Reset dead zone - hover will be enabled after mouse moves 3+ pixels
         deadZoneInitialPosition = nil
         isAllowedToMouseHover = false
         startMouseMonitor()
 
         orderFront(nil)
+    }
+
+    private func createRowStackView() -> NSStackView {
+        let rowStack = NSStackView()
+        rowStack.orientation = .horizontal
+        rowStack.spacing = itemSpacing
+        rowStack.alignment = .centerY
+        rowStack.translatesAutoresizingMaskIntoConstraints = false
+        return rowStack
     }
 
     private func startMouseMonitor() {
@@ -180,25 +234,30 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         // Use mouseLocationOutsideOfEventStream for accurate position in non-activating panel
         let windowPoint = mouseLocationOutsideOfEventStream
 
-        for (index, view) in appViews.enumerated() {
-            // Convert view bounds to window coordinates
-            let viewFrame = view.convert(view.bounds, to: nil)
-            if viewFrame.contains(windowPoint) {
-                if selectedIndex != index {
-                    selectedIndex = index
-                    updateSelection()
+        for (rowIndex, row) in rows.enumerated() {
+            for (colIndex, view) in row.enumerated() {
+                // Convert view bounds to window coordinates
+                let viewFrame = view.convert(view.bounds, to: nil)
+                if viewFrame.contains(windowPoint) {
+                    if selectedRow != rowIndex || selectedColumn != colIndex {
+                        selectedRow = rowIndex
+                        selectedColumn = colIndex
+                        updateSelection()
+                    }
+                    return
                 }
-                return
             }
         }
     }
 
     func getAppAtPoint(_ windowPoint: NSPoint) -> AppInfo? {
-        for view in appViews {
-            // Convert view bounds to window coordinates
-            let viewFrame = view.convert(view.bounds, to: nil)
-            if viewFrame.contains(windowPoint) {
-                return view.appInfo
+        for row in rows {
+            for view in row {
+                // Convert view bounds to window coordinates
+                let viewFrame = view.convert(view.bounds, to: nil)
+                if viewFrame.contains(windowPoint) {
+                    return view.appInfo
+                }
             }
         }
         return nil
@@ -219,52 +278,142 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     }
 
     func selectNext() {
-        guard !appViews.isEmpty else { return }
-        selectedIndex = (selectedIndex + 1) % appViews.count
+        guard !rows.isEmpty else { return }
+
+        // Move right in current row
+        if selectedColumn < rows[selectedRow].count - 1 {
+            selectedColumn += 1
+        } else {
+            // Move to next row, first column
+            if selectedRow < rows.count - 1 {
+                selectedRow += 1
+                selectedColumn = 0
+            } else {
+                // Wrap to first row, first column
+                selectedRow = 0
+                selectedColumn = 0
+            }
+        }
         updateSelection()
     }
 
     func selectPrevious() {
-        guard !appViews.isEmpty else { return }
-        selectedIndex = (selectedIndex - 1 + appViews.count) % appViews.count
+        guard !rows.isEmpty else { return }
+
+        // Move left in current row
+        if selectedColumn > 0 {
+            selectedColumn -= 1
+        } else {
+            // Move to previous row, last column
+            if selectedRow > 0 {
+                selectedRow -= 1
+                selectedColumn = rows[selectedRow].count - 1
+            } else {
+                // Wrap to last row, last column
+                selectedRow = rows.count - 1
+                selectedColumn = rows[selectedRow].count - 1
+            }
+        }
+        updateSelection()
+    }
+
+    func selectUp() {
+        guard rows.count > 1 else { return }
+
+        if selectedRow > 0 {
+            selectedRow -= 1
+        } else {
+            // Wrap to last row
+            selectedRow = rows.count - 1
+        }
+        // Clamp column to row length
+        selectedColumn = min(selectedColumn, rows[selectedRow].count - 1)
+        updateSelection()
+    }
+
+    func selectDown() {
+        guard rows.count > 1 else { return }
+
+        if selectedRow < rows.count - 1 {
+            selectedRow += 1
+        } else {
+            // Wrap to first row
+            selectedRow = 0
+        }
+        // Clamp column to row length
+        selectedColumn = min(selectedColumn, rows[selectedRow].count - 1)
         updateSelection()
     }
 
     func getSelectedApp() -> AppInfo? {
-        guard selectedIndex >= 0 && selectedIndex < appViews.count else { return nil }
-        return appViews[selectedIndex].appInfo
+        guard selectedRow >= 0 && selectedRow < rows.count else { return nil }
+        guard selectedColumn >= 0 && selectedColumn < rows[selectedRow].count else { return nil }
+        return rows[selectedRow][selectedColumn].appInfo
     }
 
     func removeSelectedApp() -> AppInfo? {
-        guard selectedIndex >= 0 && selectedIndex < appViews.count else { return nil }
+        guard selectedRow >= 0 && selectedRow < rows.count else { return nil }
+        guard selectedColumn >= 0 && selectedColumn < rows[selectedRow].count else { return nil }
 
-        let removedApp = appViews[selectedIndex].appInfo
-        let removedView = appViews[selectedIndex]
+        let removedView = rows[selectedRow][selectedColumn]
+        let removedApp = removedView.appInfo
 
         // Temporarily disable hover during removal (panel resize can trigger mouseEntered)
         let wasAllowed = isAllowedToMouseHover
         isAllowedToMouseHover = false
 
-        // Remove view
-        stackView.removeArrangedSubview(removedView)
-        removedView.removeFromSuperview()
-        appViews.remove(at: selectedIndex)
+        // Remove from flat list
+        if let flatIndex = appViews.firstIndex(where: { $0 === removedView }) {
+            appViews.remove(at: flatIndex)
+        }
+
+        // Remove from current row's stack view
+        if let rowStackView = removedView.superview as? NSStackView {
+            rowStackView.removeArrangedSubview(removedView)
+            removedView.removeFromSuperview()
+        }
+
+        // Remove from rows array
+        rows[selectedRow].remove(at: selectedColumn)
+
+        // Remove empty rows
+        if rows[selectedRow].isEmpty {
+            if let rowStackView = verticalStackView.arrangedSubviews[safe: selectedRow] {
+                verticalStackView.removeArrangedSubview(rowStackView)
+                rowStackView.removeFromSuperview()
+            }
+            rows.remove(at: selectedRow)
+        }
 
         // Adjust selection
-        if appViews.isEmpty {
-            selectedIndex = -1
-        } else if selectedIndex >= appViews.count {
-            selectedIndex = appViews.count - 1
+        if rows.isEmpty {
+            selectedRow = -1
+            selectedColumn = -1
+        } else {
+            // Clamp row
+            if selectedRow >= rows.count {
+                selectedRow = rows.count - 1
+            }
+            // Clamp column
+            if selectedColumn >= rows[selectedRow].count {
+                selectedColumn = rows[selectedRow].count - 1
+            }
         }
 
         // Update panel size
-        if !appViews.isEmpty {
-            let panelWidth = CGFloat(appViews.count) * itemSize + CGFloat(appViews.count - 1) * itemSpacing + panelPadding * 2
+        if !rows.isEmpty {
+            let rowCount = rows.count
+            let maxRowCount = rows.map { $0.count }.max() ?? 1
+            let panelWidth = CGFloat(maxRowCount) * itemSize + CGFloat(maxRowCount - 1) * itemSpacing + panelPadding * 2
+            let panelHeight = CGFloat(rowCount) * itemSize + CGFloat(rowCount - 1) * rowSpacing + panelPadding * 2
 
             var frame = self.frame
             let centerX = frame.midX
+            let centerY = frame.midY
             frame.size.width = panelWidth
+            frame.size.height = panelHeight
             frame.origin.x = centerX - panelWidth / 2
+            frame.origin.y = centerY - panelHeight / 2
             setFrame(frame, display: true)
 
             updateSelection()
@@ -279,14 +428,16 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     }
 
     var hasApps: Bool {
-        !appViews.isEmpty
+        !rows.isEmpty
     }
 
     // MARK: - Private Methods
 
     private func updateSelection() {
-        for (index, view) in appViews.enumerated() {
-            view.setSelected(index == selectedIndex)
+        for (rowIndex, row) in rows.enumerated() {
+            for (colIndex, view) in row.enumerated() {
+                view.setSelected(rowIndex == selectedRow && colIndex == selectedColumn)
+            }
         }
     }
 
@@ -294,10 +445,22 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
 
     func appItemHovered(_ view: AppItemView) {
         guard isAllowedToMouseHover else { return }
-        if let index = appViews.firstIndex(where: { $0 === view }) {
-            selectedIndex = index
-            updateSelection()
+        for (rowIndex, row) in rows.enumerated() {
+            if let colIndex = row.firstIndex(where: { $0 === view }) {
+                selectedRow = rowIndex
+                selectedColumn = colIndex
+                updateSelection()
+                return
+            }
         }
+    }
+}
+
+// MARK: - Array Safe Subscript Extension
+
+private extension Array {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 

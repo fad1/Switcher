@@ -19,6 +19,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     private let kVK_Return: UInt16 = 0x24
     private let kVK_LeftArrow: UInt16 = 0x7B
     private let kVK_RightArrow: UInt16 = 0x7C
+    private let kVK_UpArrow: UInt16 = 0x7E
+    private let kVK_DownArrow: UInt16 = 0x7D
     private let kVK_H: UInt16 = 0x04
     private let kVK_Q: UInt16 = 0x0C
 
@@ -133,6 +135,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
 
         case kVK_RightArrow:
             panel.selectNext()
+
+        case kVK_UpArrow:
+            panel.selectUp()
+
+        case kVK_DownArrow:
+            panel.selectDown()
 
         case kVK_H:
             hideSelectedApp()

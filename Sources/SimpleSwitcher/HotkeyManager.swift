@@ -47,6 +47,8 @@ class HotkeyManager {
         case rightArrow = 5 // Cmd+Right - next
         case escape = 6     // Cmd+Escape - dismiss
         case returnKey = 7  // Cmd+Return - activate
+        case upArrow = 8    // Cmd+Up - previous row
+        case downArrow = 9  // Cmd+Down - next row
     }
 
     // Map hotkey IDs to key codes for delegate
@@ -56,6 +58,8 @@ class HotkeyManager {
         HotkeyID.q.rawValue: UInt16(kVK_ANSI_Q),
         HotkeyID.leftArrow.rawValue: UInt16(kVK_LeftArrow),
         HotkeyID.rightArrow.rawValue: UInt16(kVK_RightArrow),
+        HotkeyID.upArrow.rawValue: UInt16(kVK_UpArrow),
+        HotkeyID.downArrow.rawValue: UInt16(kVK_DownArrow),
         HotkeyID.escape.rawValue: UInt16(kVK_Escape),
         HotkeyID.returnKey.rawValue: UInt16(kVK_Return),
     ]
@@ -96,6 +100,8 @@ class HotkeyManager {
             (.q, kVK_ANSI_Q),
             (.leftArrow, kVK_LeftArrow),
             (.rightArrow, kVK_RightArrow),
+            (.upArrow, kVK_UpArrow),
+            (.downArrow, kVK_DownArrow),
             (.escape, kVK_Escape),
             (.returnKey, kVK_Return),
         ]
