@@ -91,6 +91,18 @@ System Settings → General → Login Items → add Switcher
 
 Mouse: hover to select (after slight movement), click to activate.
 
+## Options
+
+**Grayscale icons** — show app icons without color:
+```bash
+defaults write com.simpleswitcher.app grayscaleIcons -bool true
+```
+To revert:
+```bash
+defaults delete com.simpleswitcher.app grayscaleIcons
+```
+Restart the app after changing.
+
 ## Permissions
 
 **Only Accessibility** — no Input Monitoring, no Screen Recording, no admin access.
