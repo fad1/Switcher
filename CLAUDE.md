@@ -116,6 +116,8 @@ Sources/SimpleSwitcher/
 
 ## Build & Run
 
+> **Do not run `swift build` from Claude Code.** The sandbox prevents SPM from compiling. The user will build manually.
+
 ### Development
 ```bash
 cd /Users/Shared/sv-fahd/SimpleSwitcher

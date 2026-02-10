@@ -41,6 +41,12 @@ class AppItemView: NSView {
 
         // Add icon
         iconImageView.translatesAutoresizingMaskIntoConstraints = false
+        iconImageView.wantsLayer = true
+        if UserDefaults.standard.bool(forKey: "grayscaleIcons") {
+            let filter = CIFilter(name: "CIColorControls")!
+            filter.setValue(0, forKey: kCIInputSaturationKey)
+            iconImageView.layer?.filters = [filter]
+        }
         addSubview(iconImageView)
 
         NSLayoutConstraint.activate([
