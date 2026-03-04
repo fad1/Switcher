@@ -116,18 +116,18 @@ Sources/SimpleSwitcher/
 
 ## Build & Run
 
-> **Do not run `swift build` from Claude Code.** The sandbox prevents SPM from compiling. The user will build manually.
+> **Use `--disable-sandbox` flag** when building from Claude Code or Sandvault. SPM internally uses `sandbox-exec` which conflicts with the environment sandbox. This is safe — the environment already provides OS-level sandboxing.
 
 ### Development
 ```bash
 cd /Users/Shared/sv-fahd/SimpleSwitcher
-swift build
+swift build --disable-sandbox
 .build/debug/SimpleSwitcher
 ```
 
 ### Release Build
 ```bash
-swift build -c release
+swift build -c release --disable-sandbox
 .build/release/SimpleSwitcher
 ```
 
