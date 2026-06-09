@@ -120,7 +120,7 @@ Sources/SimpleSwitcher/
 
 ### Development
 ```bash
-cd /Users/Shared/sv-fahd/SimpleSwitcher
+cd /Users/fahd/Claude/SimpleSwitcher
 swift build --disable-sandbox
 .build/debug/SimpleSwitcher
 ```
@@ -209,9 +209,9 @@ gh release create v1.x.x Switcher.zip --title "Switcher v1.x.x" --notes "Release
 # Get SHA256 of new release
 curl -sL https://github.com/fad1/Switcher/releases/download/v1.x.x/Switcher.zip | shasum -a 256
 
-# Update tap repo at /Users/Shared/sv-fahd/homebrew-tap
+# Update tap repo at /Users/fahd/Claude/homebrew-tap
 # Edit Casks/switcher.rb: update version and sha256
-cd /Users/Shared/sv-fahd/homebrew-tap
+cd /Users/fahd/Claude/homebrew-tap
 # Update version and sha256 in Casks/switcher.rb
 git add . && git commit -m "Update Switcher to v1.x.x" && git push
 ```
@@ -234,7 +234,7 @@ rm Switcher.zip
 
 ## References
 
-The [AltTab](https://github.com/lwouis/alt-tab-macos) codebase (located at `/Users/Shared/sv-fahd/alt-tab-macos`) is an excellent reference for:
+The [AltTab](https://github.com/lwouis/alt-tab-macos) codebase (located at `/Users/fahd/Claude/_reference/alt-tab-macos`) is an excellent reference for:
 - CGEvent tap patterns and threading
 - Private API usage (`CGSSetSymbolicHotKeyEnabled`, etc.)
 - Window listing and filtering
