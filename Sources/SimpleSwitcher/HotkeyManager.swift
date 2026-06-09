@@ -21,6 +21,11 @@ class HotkeyManager {
     private var activeHotKeyRefs: [EventHotKeyRef?] = []
     private var eventTap: CFMachPort?
 
+    // Dedicated thread + run loop that services the event tap, so its callback is
+    // never starved by main-thread UI work (see setupEventTap for rationale).
+    private var eventTapThread: Thread?
+    private var eventTapRunLoop: CFRunLoop?
+
     // Serial queue for thread-safe state access
     private let stateQueue = DispatchQueue(label: "com.simpleswitcher.state")
 
@@ -87,6 +92,12 @@ class HotkeyManager {
             CGEvent.tapEnable(tap: eventTap, enable: false)
             self.eventTap = nil
         }
+        // Stop the dedicated event-tap thread's run loop so the thread can exit
+        if let runLoop = eventTapRunLoop {
+            CFRunLoopStop(runLoop)
+            eventTapRunLoop = nil
+        }
+        eventTapThread = nil
     }
 
     /// Register hotkeys that only work when panel is active (Cmd+H, Cmd+Q, etc.)
@@ -247,13 +258,28 @@ class HotkeyManager {
             userInfo: userDataPtr
         )
 
-        if let eventTap = eventTap {
+        guard let eventTap = eventTap else {
+            print("ERROR: Failed to create event tap. Grant Accessibility permission in System Settings > Privacy & Security > Accessibility")
+            return
+        }
+
+        // Service the tap on a dedicated, high-priority thread with its own run loop.
+        // Previously the source was added to the main run loop, so the Cmd-release
+        // callback competed with main-thread UI work (loading icons, building the
+        // panel). When that work ran long, macOS disabled the tap by timeout and the
+        // Cmd-up event was lost — leaving the switcher panel stuck open. A dedicated
+        // thread keeps the callback responsive regardless of what the UI is doing.
+        let thread = Thread { [weak self] in
             let runLoopSource = CFMachPortCreateRunLoopSource(nil, eventTap, 0)
             CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+            self?.eventTapRunLoop = CFRunLoopGetCurrent()
             CGEvent.tapEnable(tap: eventTap, enable: true)
             print("Event tap created successfully")
-        } else {
-            print("ERROR: Failed to create event tap. Grant Accessibility permission in System Settings > Privacy & Security > Accessibility")
+            CFRunLoopRun()
         }
+        thread.name = "com.simpleswitcher.eventtap"
+        thread.qualityOfService = .userInteractive
+        eventTapThread = thread
+        thread.start()
     }
 }
