@@ -20,7 +20,7 @@ A fast, lightweight Cmd+Tab replacement for macOS. No bloat, no lag, no memory l
 - ✅ Native macOS blur effect
 - ✅ Instant response (<16ms)
 - ✅ ~30MB memory footprint
-- ✅ Zero background CPU when idle
+- ✅ Negligible background CPU (a lightweight permission check, no window polling)
 - ✅ Keyboard shortcuts: H to hide, Q to quit, Shift to go back
 - ✅ Mouse support: hover to select, click to activate
 - ✅ Multi-monitor: appears on screen where your pointer is
@@ -64,14 +64,14 @@ Until you grant permission, Switcher **leaves your native Cmd+Tab working** and 
 
 > Switcher is ad-hoc signed, so rebuilding/replacing the app can invalidate a previous grant — just remove and re-add it under Accessibility.
 
-### Removing Permission
+### Stopping Switcher
 
-If you turn Switcher's Accessibility permission off while it's running, it automatically restores your native Cmd+Tab and waits for you to re-enable it.
+To turn Switcher off, use **menu bar ⌘ → Quit**.
 
-> Note: there's a [known macOS bug](https://developer.apple.com/forums/thread/735204) where removing Accessibility permission from *any* app using CGEventTap while it's running can briefly affect mouse input. Switcher disables its tap as soon as it detects the change to minimize this, but quitting first (menu bar → Quit) is still the cleanest way.
+> Removing its Accessibility permission is *not* a reliable off-switch: macOS caches an app's permission for its entire running lifetime, so Switcher keeps working until you **relaunch** it (at which point it sees no permission and leaves Cmd+Tab alone). Switcher uses a *passive* event tap, so — unlike many tools — revoking its permission does **not** risk the [known macOS input-freeze](https://developer.apple.com/forums/thread/735204) that active-tap apps can trigger.
 
 ### Auto-Start
-System Settings → General → Login Items → add Switcher
+Open **Preferences** (menu bar ⌘) and tick **Start at login** (macOS 13+). Or add it manually via System Settings → General → Login Items.
 
 ## Usage
 

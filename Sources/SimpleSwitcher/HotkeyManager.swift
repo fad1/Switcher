@@ -7,9 +7,6 @@ protocol HotkeyManagerDelegate: AnyObject {
     func keyPressed(_ keyCode: UInt16)
     func shiftPressed()
     func mouseClicked(at point: CGPoint)
-    /// Accessibility permission was revoked while running (the event tap can no
-    /// longer function). The delegate should restore native Cmd+Tab.
-    func accessibilityRevoked()
 }
 
 class HotkeyManager {
@@ -244,21 +241,18 @@ class HotkeyManager {
                     DispatchQueue.main.async {
                         manager.delegate?.mouseClicked(at: location)
                     }
-                    // Consume the click - don't pass to underlying app
-                    return nil
+                    // NOTE: the tap is .listenOnly (so revoking Accessibility can
+                    // never freeze input), which means we CANNOT consume the click
+                    // — it also reaches whatever is under the cursor. Keyboard use
+                    // is unaffected; this only matters for click-to-dismiss.
                 }
             } else if type == .tapDisabledByUserInput || type == .tapDisabledByTimeout {
-                // The tap is also disabled when Accessibility permission is
-                // revoked. Distinguish that (trust == false) from a benign
-                // timeout so we can restore native Cmd+Tab instead of looping.
-                if AXIsProcessTrusted() {
-                    if let eventTap = manager.eventTap {
-                        CGEvent.tapEnable(tap: eventTap, enable: true)
-                    }
-                } else {
-                    DispatchQueue.main.async {
-                        manager.delegate?.accessibilityRevoked()
-                    }
+                // Benign: macOS disables the tap after heavy input or a timeout —
+                // just re-enable it. (Revocation is handled by AppDelegate's
+                // permission poll, because macOS does NOT reliably deliver this
+                // event when Accessibility permission is revoked.)
+                if let eventTap = manager.eventTap {
+                    CGEvent.tapEnable(tap: eventTap, enable: true)
                 }
             }
 
@@ -267,10 +261,13 @@ class HotkeyManager {
 
         let userDataPtr = Unmanaged.passUnretained(self).toOpaque()
 
+        // .listenOnly (passive): the window server never waits on this tap, so
+        // revoking Accessibility while it's alive cannot freeze input. The cost is
+        // we can't consume events (see the mouseDown branch above).
         eventTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .defaultTap,
+            options: .listenOnly,
             eventsOfInterest: CGEventMask(eventMask),
             callback: callback,
             userInfo: userDataPtr

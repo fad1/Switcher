@@ -8,6 +8,7 @@ class PreferencesWindowController: NSWindowController {
     /// can show/hide the status item live. Carries the new value.
     var onToggleMenuBar: ((Bool) -> Void)?
 
+    private var launchAtLoginCheckbox: NSButton!
     private var menuBarCheckbox: NSButton!
     private var grayscaleCheckbox: NSButton!
 
@@ -30,6 +31,14 @@ class PreferencesWindowController: NSWindowController {
     private func setupContent() {
         guard let contentView = window?.contentView else { return }
 
+        launchAtLoginCheckbox = NSButton(
+            checkboxWithTitle: "Start at login",
+            target: self,
+            action: #selector(toggleLaunchAtLogin)
+        )
+        // Hidden (collapsed by the stack view) on macOS < 13 where it's unsupported.
+        launchAtLoginCheckbox.isHidden = !LoginItem.isSupported
+
         menuBarCheckbox = NSButton(
             checkboxWithTitle: "Show icon in menu bar",
             target: self,
@@ -49,6 +58,7 @@ class PreferencesWindowController: NSWindowController {
         versionLabel.textColor = .secondaryLabelColor
 
         let stack = NSStackView(views: [
+            launchAtLoginCheckbox,
             menuBarCheckbox,
             grayscaleCheckbox,
             donateButton,
@@ -76,9 +86,10 @@ class PreferencesWindowController: NSWindowController {
         window?.makeKeyAndOrderFront(nil)
     }
 
-    /// Refresh checkbox states from persisted values (they may have changed via
-    /// the menu bar Donate item or the terminal between shows).
+    /// Refresh control states from the current source of truth (they may have
+    /// changed via the menu bar, the terminal, or System Settings between shows).
     private func syncFromPreferences() {
+        launchAtLoginCheckbox.state = LoginItem.isEnabled ? .on : .off
         menuBarCheckbox.state = Preferences.showMenuBarIcon ? .on : .off
         grayscaleCheckbox.state = Preferences.grayscaleIcons ? .on : .off
     }
@@ -86,6 +97,14 @@ class PreferencesWindowController: NSWindowController {
     private func versionString() -> String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
         return version.map { "Version \($0)" } ?? ""
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        let want = launchAtLoginCheckbox.state == .on
+        if !LoginItem.setEnabled(want) {
+            // Toggle failed — snap the checkbox back to the real state.
+            launchAtLoginCheckbox.state = LoginItem.isEnabled ? .on : .off
+        }
     }
 
     @objc private func toggleMenuBar() {

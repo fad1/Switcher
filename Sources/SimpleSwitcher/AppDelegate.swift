@@ -17,8 +17,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
 
     // True once we've taken over Cmd+Tab (event tap live + native Cmd+Tab disabled).
     private var switchingEnabled = false
-    // Polls for the Accessibility grant while switching is disabled.
-    private var permissionTimer: Timer?
+    // Background monitor that reconciles Accessibility permission state.
+    private let permissionQueue = DispatchQueue(label: "com.simpleswitcher.permission")
+    private var permissionTimer: DispatchSourceTimer?
+    private var activityToken: NSObjectProtocol?
+    private var isHandlingRevocation = false
 
     // Key codes
     private let kVK_Tab: UInt16 = 0x30
@@ -64,14 +67,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         maybeShowDonationNag()
 
         // Only take over Cmd+Tab once Accessibility permission is confirmed. Until
-        // then, native Cmd+Tab is left working and we poll for the grant — so a
-        // first launch without permission can never leave the system broken.
+        // then, native Cmd+Tab is left working — so a first launch without
+        // permission can never leave the system broken.
         if AccessibilityPermission.isGranted {
             enableSwitching()
         } else {
             AccessibilityPermission.prompt()
-            startPermissionPolling()
         }
+        // Continuously reconcile permission: enable switching when granted, and
+        // (critically) QUIT if it is revoked while running — terminating the
+        // process is the only reliable way to release the event tap and clear
+        // the macOS input-freeze bug.
+        startPermissionMonitor()
 
         print("SimpleSwitcher started. Press Cmd+Tab to activate.")
     }
@@ -153,12 +160,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         }
         // Click outside just dismisses without activating
         dismissPanel()
-    }
-
-    func accessibilityRevoked() {
-        // Permission was turned off while running — give the user back a working
-        // Cmd+Tab and wait for it to be re-granted.
-        disableSwitching()
     }
 
     func keyPressed(_ keyCode: UInt16) {
@@ -264,28 +265,48 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         print("Switching enabled.")
     }
 
-    /// Hand Cmd+Tab back to macOS and wait for permission to return. Called when
-    /// Accessibility is revoked while running.
-    private func disableSwitching() {
-        guard switchingEnabled else { return }
-        setNativeCommandTabEnabled(true)
-        hotkeyManager.stop()
-        switchingEnabled = false
-        print("Switching disabled (Accessibility permission lost). Waiting for re-grant…")
-        startPermissionPolling()
+    /// Polls Accessibility permission on a background timer and reconciles state.
+    /// Deliberately a poll, not a CGEvent-tap callback: macOS does NOT reliably
+    /// deliver a tap-disabled event when permission is revoked, so the callback
+    /// cannot be trusted to detect revocation.
+    private func startPermissionMonitor() {
+        guard permissionTimer == nil else { return }
+        // Disable App Nap so the timer keeps firing promptly while we hold the
+        // tap. Allow idle system sleep — we only want to prevent napping, not keep
+        // the whole Mac awake.
+        activityToken = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep],
+            reason: "Monitor Accessibility permission to prevent input freeze"
+        )
+        let timer = DispatchSource.makeTimerSource(queue: permissionQueue)
+        timer.schedule(deadline: .now() + 1.0, repeating: 1.0, leeway: .milliseconds(200))
+        timer.setEventHandler { [weak self] in
+            let granted = AccessibilityPermission.isGranted
+            DispatchQueue.main.async { self?.reconcilePermission(granted: granted) }
+        }
+        permissionTimer = timer
+        timer.resume()
     }
 
-    private func startPermissionPolling() {
-        guard permissionTimer == nil else { return }
-        // .common mode so the donation NSAlert.runModal() can't pause the poll.
-        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] t in
-            guard AccessibilityPermission.isGranted else { return }
-            t.invalidate()
-            self?.permissionTimer = nil
-            self?.enableSwitching()
+    private func reconcilePermission(granted: Bool) {
+        if granted {
+            if !switchingEnabled { enableSwitching() }
+        } else if switchingEnabled {
+            handleRevocation()
         }
-        RunLoop.main.add(timer, forMode: .common)
-        permissionTimer = timer
+    }
+
+    /// Accessibility was revoked while we held the event tap. Restore native
+    /// Cmd+Tab and QUIT. Terminating the process is the only reliable way to tear
+    /// the tap out of the window server and clear the macOS input-freeze bug —
+    /// disabling the tap in-process while staying alive is NOT enough.
+    private func handleRevocation() {
+        guard !isHandlingRevocation else { return }
+        isHandlingRevocation = true
+        switchingEnabled = false
+        setNativeCommandTabEnabled(true)
+        hotkeyManager.stop()
+        NSApp.terminate(nil)
     }
 
     // MARK: - Preferences & Menu Bar

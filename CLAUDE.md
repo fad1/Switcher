@@ -9,7 +9,7 @@ Switcher intercepts the native Cmd+Tab hotkey and displays a custom switcher pan
 - Apps with only minimized windows
 - Background-only apps
 
-**Total codebase: ~1100 lines across 10 Swift files**
+**Total codebase: ~1250 lines across 12 Swift files**
 
 ## Architecture
 
@@ -22,6 +22,8 @@ Sources/SimpleSwitcher/
 ├── AppSwitcherPanel.swift# NSPanel subclass with visual effect blur
 ├── AppItemView.swift    # Individual app item (icon + name)
 ├── Preferences.swift    # UserDefaults wrapper (settings keys + donate helper)
+├── AccessibilityPermission.swift # AXIsProcessTrusted check + system prompt
+├── LoginItem.swift      # "Start at login" via SMAppService (macOS 13+)
 ├── StatusBarController.swift     # Optional menu bar icon (NSStatusItem) + menu
 ├── PreferencesWindowController.swift # Programmatic Preferences window
 └── PrivateAPIs.swift    # CGSSetSymbolicHotKeyEnabled binding
@@ -40,21 +42,22 @@ Sources/SimpleSwitcher/
 - Handles keyboard shortcuts (Tab, Shift, Arrows, H, Q, Escape, Return)
 - Handles mouse clicks (inside panel = activate clicked app, outside = dismiss)
 - **Permission gating**: never disables native Cmd+Tab until the event tap is alive
-  - `enableSwitching()`: creates the tap FIRST, and only then disables native Cmd+Tab + registers the Cmd+Tab hotkey (order matters — see below)
-  - On launch without Accessibility permission: leaves native Cmd+Tab working, fires the system prompt, and polls (`startPermissionPolling`) until granted, then auto-enables
-  - `disableSwitching()` (via `accessibilityRevoked()` delegate): if permission is revoked while running, restores native Cmd+Tab and waits for re-grant
+  - `enableSwitching()`: creates the tap FIRST, and only then disables native Cmd+Tab + registers the Cmd+Tab hotkey (order matters)
+  - On launch without Accessibility permission: leaves native Cmd+Tab working and fires the system prompt
+  - `startPermissionMonitor()`: a background ~1s poll of `AXIsProcessTrusted()` (App Nap disabled via `beginActivity`) reconciles state — `enableSwitching()` when granted; on revoke `handleRevocation()` restores native Cmd+Tab and quits
+  - **Freeze prevention is in the tap type, not the recovery**: the tap is **`.listenOnly`** (see HotkeyManager), so revoking permission can't freeze input regardless of detection. The original attempt to *recover* from an active-tap freeze (quit-on-revoke) was unreliable and is now just a best-effort cleanup.
+  - **`AXIsProcessTrusted()` caches per process**: macOS keeps reporting a running app as trusted even after permission is revoked, until relaunch. So the revoke branch usually does NOT fire — the app keeps working until relaunched. This is harmless now that the tap is passive. Grant detection (the path that matters) works fine.
 
 **HotkeyManager.swift**
 - Registers Cmd+Tab globally (via `registerHotkeys()`, called by AppDelegate once permission is confirmed)
 - `tryCreateEventTap() -> Bool`: creates the CGEvent tap; returns false when Accessibility permission is missing (the gate AppDelegate checks before touching native Cmd+Tab). Idempotent.
-- Detects permission revocation: when the tap is disabled and `AXIsProcessTrusted()` is false, calls the delegate's `accessibilityRevoked()` (event-driven, so no idle-time polling)
+- **`.listenOnly` (passive) CGEvent tap**: the window server never waits on it, so revoking Accessibility while it's alive cannot freeze input (an active `.defaultTap` can — forums thread 735204). Trade-off: a passive tap can't consume events, so clicks aren't swallowed (clicking outside the open switcher to dismiss also passes through to whatever's behind it).
+- On `tapDisabledByUserInput`/`tapDisabledByTimeout` (benign throttling) it just re-enables the tap
 - Dynamically registers/unregisters other hotkeys (H, Q, arrows, Escape, Return) when panel is shown/hidden
   - `registerActiveHotkeys()` called when panel opens
   - `unregisterActiveHotkeys()` called when panel closes
   - This ensures Cmd+H/Q work normally in other apps when panel is not showing
-- Creates CGEvent tap to monitor:
-  - flagsChanged: Detect Cmd release (dismiss), Shift press (previous)
-  - mouseDown: Forward click location to delegate
+- Tap monitors (read-only): flagsChanged (Cmd release / Shift) and mouseDown (forward click location to delegate)
 - **Note**: Uses Carbon hotkeys instead of CGEvent keyDown to avoid requiring Input Monitoring permission (only Accessibility needed)
 - **Thread safety**: Uses `DispatchQueue` for synchronized access to `isActive` state
 - **Critical**: Sets `isActive` synchronously in event handlers before async delegate calls to avoid race conditions in release builds
@@ -91,7 +94,8 @@ Sources/SimpleSwitcher/
 
 **PreferencesWindowController.swift**
 - Reusable programmatic Preferences window (`isReleasedWhenClosed = false`)
-- Checkboxes: "Show icon in menu bar", "Grayscale icons"; plus a Donate button and version label
+- Checkboxes: "Start at login" (hidden on macOS < 13), "Show icon in menu bar", "Grayscale icons"; plus a Donate button and version label
+- The "Start at login" checkbox reflects the live `SMAppService` state (not a stored pref); `syncFromPreferences()` refreshes all controls on show
 - `show()` calls `NSApp.activate(ignoringOtherApps:)` + `makeKeyAndOrderFront` so controls are clickable while staying `.accessory` (no Dock icon)
 - `onToggleMenuBar` callback lets AppDelegate show/hide the status item immediately
 
@@ -143,7 +147,8 @@ Sources/SimpleSwitcher/
 - Required for CGEvent tap to detect modifier key changes (Cmd release, Shift press)
 - App checks `AXIsProcessTrusted()` on launch and prompts if missing
 - **Without it the app stays safe**: native Cmd+Tab is left working (never disabled), the menu bar icon's Quit is available, and the app polls — taking over automatically within ~1s of being granted. No zombie state, no Activity Monitor needed.
-- Implemented in `AccessibilityPermission.swift` + AppDelegate's `enableSwitching`/`disableSwitching`/`startPermissionPolling`
+- **If revoked while running**: the app restores native Cmd+Tab and quits itself within ~1s (terminating clears the macOS event-tap input-freeze bug). Quitting Switcher *before* revoking avoids any input hiccup.
+- Implemented in `AccessibilityPermission.swift` + AppDelegate's `enableSwitching`/`handleRevocation`/`startPermissionMonitor`
 
 **Note**: Input Monitoring is NOT required because keyboard shortcuts use Carbon hotkeys (RegisterEventHotKey) instead of CGEvent keyDown monitoring.
 
@@ -178,9 +183,8 @@ swift build -c release
 This creates `Switcher.app` which can be moved to `/Applications`.
 
 ### Auto-Start at Login
-1. Move `Switcher.app` to `/Applications`
-2. Open System Settings > General > Login Items
-3. Click + and add Switcher
+- **In-app**: Preferences → "Start at login" (macOS 13+, via `SMAppService.mainApp` in `LoginItem.swift`). The system tracks the state; there's no UserDefaults key. The checkbox is hidden on macOS < 13.
+- **Manual**: move `Switcher.app` to `/Applications`, then System Settings > General > Login Items > + > Switcher
 
 ## Keyboard Shortcuts (while panel is open)
 
