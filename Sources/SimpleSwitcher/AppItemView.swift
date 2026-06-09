@@ -40,7 +40,7 @@ class AppItemView: NSView {
     private func setupViews() {
         wantsLayer = true
         layer?.cornerRadius = 8
-        if UserDefaults.standard.bool(forKey: "grayscaleIcons") {
+        if Preferences.grayscaleIcons {
             let filter = CIFilter(name: "CIColorControls")!
             filter.setValue(0, forKey: kCIInputSaturationKey)
             layer?.filters = [filter]

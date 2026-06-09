@@ -12,6 +12,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     private var hotkeyManager: HotkeyManager!
     private var panel: AppSwitcherPanel!
     private var currentApps: [AppInfo] = []
+    private var statusBarController: StatusBarController!
+    private var prefsWindowController: PreferencesWindowController!
 
     // Key codes
     private let kVK_Tab: UInt16 = 0x30
@@ -43,7 +45,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         // Set app to accessory (no dock icon)
         NSApp.setActivationPolicy(.accessory)
 
+        // Settings: register in-process fallbacks before any read, then count this launch.
+        Preferences.registerDefaults()
+        Preferences.launchCount += 1
+
+        // Menu bar icon (optional, controlled by preferences)
+        statusBarController = StatusBarController()
+        statusBarController.onOpenPreferences = { [weak self] in self?.showPreferences() }
+        refreshStatusItem()
+
+        // Preferences window (reusable single instance, hidden until requested)
+        prefsWindowController = PreferencesWindowController()
+        prefsWindowController.onToggleMenuBar = { [weak self] _ in self?.refreshStatusItem() }
+
+        // Start silently; only surface the window when it's time to nag.
+        maybeShowDonationNag()
+
         print("SimpleSwitcher started. Press Cmd+Tab to activate.")
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        // Re-launching Switcher.app while it's already running surfaces Preferences.
+        showPreferences()
+        return false
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        // Closing Preferences must not quit the background agent.
+        false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -202,5 +231,36 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         hotkeyManager.isActive = false
         // Unregister active-only hotkeys so Cmd+H/Q work in other apps
         hotkeyManager.unregisterActiveHotkeys()
+    }
+
+    // MARK: - Preferences & Menu Bar
+
+    private func showPreferences() {
+        prefsWindowController.show()
+    }
+
+    private func refreshStatusItem() {
+        if Preferences.showMenuBarIcon {
+            statusBarController.show()
+        } else {
+            statusBarController.hide()
+        }
+    }
+
+    /// On startup only: every 5th launch (until the user donates) surface
+    /// Preferences alongside a donation prompt. Donating silences it forever.
+    private func maybeShowDonationNag() {
+        guard !Preferences.hasDonated, Preferences.launchCount % 5 == 0 else { return }
+
+        showPreferences()
+
+        let alert = NSAlert()
+        alert.messageText = "Enjoying Switcher?"
+        alert.informativeText = "If it's useful, consider supporting development."
+        alert.addButton(withTitle: "Donate")
+        alert.addButton(withTitle: "Maybe Later")
+        if alert.runModal() == .alertFirstButtonReturn {
+            Preferences.openDonatePage()
+        }
     }
 }

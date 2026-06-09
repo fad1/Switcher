@@ -29,8 +29,7 @@ A fast, lightweight Cmd+Tab replacement for macOS. No bloat, no lag, no memory l
 
 - ❌ Window thumbnails (requires Screen Recording permission)
 - ❌ Per-window switching
-- ❌ Preferences UI
-- ❌ Themes or customization
+- ❌ Themes or extensive customization
 - ❌ Anything else
 
 **This is intentional.** Switcher does one thing and does it well.
@@ -91,17 +90,20 @@ System Settings → General → Login Items → add Switcher
 
 Mouse: hover to select (after slight movement), click to activate.
 
-## Options
+## Preferences
 
-**Grayscale icons** — show app icons without color:
+Switcher runs in the background. Open **Preferences** from its menu bar icon, or by
+launching Switcher again while it's already running. The window lets you:
+
+- **Show icon in menu bar** — toggle the menu bar icon on or off
+- **Grayscale icons** — show app icons without color (applies on the next Cmd+Tab)
+- **Donate** — support development
+
+Grayscale can still be set from the terminal if you prefer:
 ```bash
-defaults write com.simpleswitcher.app grayscaleIcons -bool true
+defaults write com.simpleswitcher.app grayscaleIcons -bool true   # enable
+defaults delete com.simpleswitcher.app grayscaleIcons             # revert
 ```
-To revert:
-```bash
-defaults delete com.simpleswitcher.app grayscaleIcons
-```
-Restart the app after changing.
 
 ## Permissions
 

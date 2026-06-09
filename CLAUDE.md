@@ -9,7 +9,7 @@ Switcher intercepts the native Cmd+Tab hotkey and displays a custom switcher pan
 - Apps with only minimized windows
 - Background-only apps
 
-**Total codebase: ~900 lines across 7 Swift files**
+**Total codebase: ~1100 lines across 10 Swift files**
 
 ## Architecture
 
@@ -21,6 +21,9 @@ Sources/SimpleSwitcher/
 ├── AppListProvider.swift# Queries visible apps, maintains MRU order
 ├── AppSwitcherPanel.swift# NSPanel subclass with visual effect blur
 ├── AppItemView.swift    # Individual app item (icon + name)
+├── Preferences.swift    # UserDefaults wrapper (settings keys + donate helper)
+├── StatusBarController.swift     # Optional menu bar icon (NSStatusItem) + menu
+├── PreferencesWindowController.swift # Programmatic Preferences window
 └── PrivateAPIs.swift    # CGSSetSymbolicHotKeyEnabled binding
 ```
 
@@ -68,6 +71,29 @@ Sources/SimpleSwitcher/
 **AppItemView.swift**
 - Displays app icon (76x76, no label)
 - Selection highlight (white 30% alpha background)
+
+**Preferences.swift**
+- `enum Preferences`: single source of truth for persisted settings over `UserDefaults.standard`
+- Keys: `grayscaleIcons`, `showMenuBarIcon` (defaults to true), `launchCount`, `hasDonated`
+- `registerDefaults()` must run before any read on every launch (`register(defaults:)` does not persist)
+- `openDonatePage()`: the one choke point for donating — sets `hasDonated = true`, then opens the Ko-fi URL
+
+**StatusBarController.swift**
+- Owns the optional menu bar icon (`NSStatusItem`), held by a strong reference (system does not retain it)
+- `show()` / `hide()` toggle the icon live (driven by `showMenuBarIcon`)
+- Menu: Preferences… / Donate / Quit; `onOpenPreferences` closure opens the window
+
+**PreferencesWindowController.swift**
+- Reusable programmatic Preferences window (`isReleasedWhenClosed = false`)
+- Checkboxes: "Show icon in menu bar", "Grayscale icons"; plus a Donate button and version label
+- `show()` calls `NSApp.activate(ignoringOtherApps:)` + `makeKeyAndOrderFront` so controls are clickable while staying `.accessory` (no Dock icon)
+- `onToggleMenuBar` callback lets AppDelegate show/hide the status item immediately
+
+**Preferences / menu bar / donation flow (AppDelegate)**
+- App starts silently — the Preferences window does NOT auto-open on every launch
+- On startup it auto-surfaces (with a Donate / Maybe Later prompt) only when `!hasDonated && launchCount % 5 == 0`
+- On demand: the menu bar Preferences… item, or relaunching the app (`applicationShouldHandleReopen` surfaces the window)
+- `applicationShouldTerminateAfterLastWindowClosed` returns false so closing Preferences keeps the agent running
 
 **PrivateAPIs.swift**
 - Declares CGSSetSymbolicHotKeyEnabled using @_silgen_name
@@ -175,9 +201,8 @@ This creates `Switcher.app` which can be moved to `/Applications`.
 
 1. **No window thumbnails** - Would require Screen Recording permission
 2. **No per-window switching** - Shows apps, not individual windows
-3. **No preferences UI** - Configuration requires code changes
-4. **Ad-hoc signed only** - Not notarized, may trigger Gatekeeper warning on first run
-5. **Private API usage** - CGSSetSymbolicHotKeyEnabled may break in future macOS
+3. **Ad-hoc signed only** - Not notarized, may trigger Gatekeeper warning on first run
+4. **Private API usage** - CGSSetSymbolicHotKeyEnabled may break in future macOS
 
 ## Threading Notes
 
@@ -227,7 +252,7 @@ rm Switcher.zip
 
 - [ ] Number keys (1-9) for quick selection
 - [ ] Window thumbnails (requires Screen Recording permission)
-- [ ] Preferences pane (configurable shortcuts, appearance)
+- [x] Preferences window (menu bar icon toggle, grayscale toggle, donate) — basic; shortcuts still code-only
 - [x] App icon (via create-icon.sh)
 - [ ] Full code signing and notarization (currently ad-hoc signed)
 - [ ] Handle fullscreen apps better
