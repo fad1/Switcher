@@ -39,9 +39,15 @@ Sources/SimpleSwitcher/
 - Coordinates HotkeyManager and AppSwitcherPanel
 - Handles keyboard shortcuts (Tab, Shift, Arrows, H, Q, Escape, Return)
 - Handles mouse clicks (inside panel = activate clicked app, outside = dismiss)
+- **Permission gating**: never disables native Cmd+Tab until the event tap is alive
+  - `enableSwitching()`: creates the tap FIRST, and only then disables native Cmd+Tab + registers the Cmd+Tab hotkey (order matters — see below)
+  - On launch without Accessibility permission: leaves native Cmd+Tab working, fires the system prompt, and polls (`startPermissionPolling`) until granted, then auto-enables
+  - `disableSwitching()` (via `accessibilityRevoked()` delegate): if permission is revoked while running, restores native Cmd+Tab and waits for re-grant
 
 **HotkeyManager.swift**
-- Registers Cmd+Tab globally at startup
+- Registers Cmd+Tab globally (via `registerHotkeys()`, called by AppDelegate once permission is confirmed)
+- `tryCreateEventTap() -> Bool`: creates the CGEvent tap; returns false when Accessibility permission is missing (the gate AppDelegate checks before touching native Cmd+Tab). Idempotent.
+- Detects permission revocation: when the tap is disabled and `AXIsProcessTrusted()` is false, calls the delegate's `accessibilityRevoked()` (event-driven, so no idle-time polling)
 - Dynamically registers/unregisters other hotkeys (H, Q, arrows, Escape, Return) when panel is shown/hidden
   - `registerActiveHotkeys()` called when panel opens
   - `unregisterActiveHotkeys()` called when panel closes
@@ -135,8 +141,9 @@ Sources/SimpleSwitcher/
 
 **Accessibility** (System Settings > Privacy & Security > Accessibility)
 - Required for CGEvent tap to detect modifier key changes (Cmd release, Shift press)
-- Without this, event tap creation fails
-- App prompts user on first launch
+- App checks `AXIsProcessTrusted()` on launch and prompts if missing
+- **Without it the app stays safe**: native Cmd+Tab is left working (never disabled), the menu bar icon's Quit is available, and the app polls — taking over automatically within ~1s of being granted. No zombie state, no Activity Monitor needed.
+- Implemented in `AccessibilityPermission.swift` + AppDelegate's `enableSwitching`/`disableSwitching`/`startPermissionPolling`
 
 **Note**: Input Monitoring is NOT required because keyboard shortcuts use Carbon hotkeys (RegisterEventHotKey) instead of CGEvent keyDown monitoring.
 
@@ -270,11 +277,11 @@ Since Apple's documentation for these low-level APIs is sparse or nonexistent, A
 
 ## Troubleshooting
 
-### "Failed to create event tap"
-Grant Accessibility permission in System Settings > Privacy & Security > Accessibility. May need to remove and re-add the app if permissions changed or app was rebuilt.
+### Switcher doesn't intercept Cmd+Tab (no Accessibility permission)
+This is now handled gracefully: the app leaves native Cmd+Tab working and polls for the grant. Enable Switcher under System Settings > Privacy & Security > Accessibility and it takes over within ~1s — no relaunch needed. Because the app is ad-hoc signed, rebuilding it can invalidate a prior grant (remove + re-add the entry).
 
 ### Native Cmd+Tab still works
-The app may have crashed without restoring the hotkey. Run the app again and quit cleanly, or log out/restart.
+Either Accessibility isn't granted yet (see above — expected), or the app crashed via SIGKILL without restoring the hotkey. SIGTERM/SIGINT/crashes restore it automatically; for SIGKILL, run the app again and quit cleanly, or log out/restart.
 
 ### Panel doesn't appear
 Check Console.app for errors. Ensure app has proper permissions.

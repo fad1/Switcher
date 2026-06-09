@@ -7,6 +7,9 @@ protocol HotkeyManagerDelegate: AnyObject {
     func keyPressed(_ keyCode: UInt16)
     func shiftPressed()
     func mouseClicked(at point: CGPoint)
+    /// Accessibility permission was revoked while running (the event tap can no
+    /// longer function). The delegate should restore native Cmd+Tab.
+    func accessibilityRevoked()
 }
 
 class HotkeyManager {
@@ -68,11 +71,6 @@ class HotkeyManager {
         HotkeyID.escape.rawValue: UInt16(kVK_Escape),
         HotkeyID.returnKey.rawValue: UInt16(kVK_Return),
     ]
-
-    func start() {
-        registerHotkeys()
-        setupEventTap()
-    }
 
     func stop() {
         // Unregister tab hotkey
@@ -137,7 +135,10 @@ class HotkeyManager {
 
     // MARK: - Carbon Hotkey Registration
 
-    private func registerHotkeys() {
+    /// Installs the Carbon event handler and registers the global Cmd+Tab hotkey.
+    /// Paired with `stop()`, which removes both — so this can be called again to
+    /// re-enable switching after a permission revoke.
+    func registerHotkeys() {
         let eventTarget = GetEventDispatcherTarget()
 
         var eventTypes = [EventTypeSpec(
@@ -189,7 +190,15 @@ class HotkeyManager {
     // MARK: - Event Tap (for modifier release and mouse clicks only)
     // Note: keyDown removed - using Carbon hotkeys instead (only requires Accessibility permission)
 
-    private func setupEventTap() {
+    /// Creates the CGEvent tap. Returns true on success (or if already created).
+    /// Returns false when `CGEvent.tapCreate` fails — which happens when
+    /// Accessibility permission is not granted. The caller uses this as the gate:
+    /// native Cmd+Tab is only disabled once this succeeds.
+    @discardableResult
+    func tryCreateEventTap() -> Bool {
+        // Idempotent: never create a second tap / run-loop source.
+        if eventTap != nil { return true }
+
         // Only listen for flagsChanged and mouse clicks
         // keyDown events require Input Monitoring permission, so we use Carbon hotkeys instead
         let eventMask = (1 << CGEventType.flagsChanged.rawValue) |
@@ -239,8 +248,17 @@ class HotkeyManager {
                     return nil
                 }
             } else if type == .tapDisabledByUserInput || type == .tapDisabledByTimeout {
-                if let eventTap = manager.eventTap {
-                    CGEvent.tapEnable(tap: eventTap, enable: true)
+                // The tap is also disabled when Accessibility permission is
+                // revoked. Distinguish that (trust == false) from a benign
+                // timeout so we can restore native Cmd+Tab instead of looping.
+                if AXIsProcessTrusted() {
+                    if let eventTap = manager.eventTap {
+                        CGEvent.tapEnable(tap: eventTap, enable: true)
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        manager.delegate?.accessibilityRevoked()
+                    }
                 }
             }
 
@@ -259,8 +277,8 @@ class HotkeyManager {
         )
 
         guard let eventTap = eventTap else {
-            print("ERROR: Failed to create event tap. Grant Accessibility permission in System Settings > Privacy & Security > Accessibility")
-            return
+            print("Event tap not created — Accessibility permission not yet granted. Waiting…")
+            return false
         }
 
         // Service the tap on a dedicated, high-priority thread with its own run loop.
@@ -281,5 +299,6 @@ class HotkeyManager {
         thread.qualityOfService = .userInteractive
         eventTapThread = thread
         thread.start()
+        return true
     }
 }

@@ -56,20 +56,19 @@ swift build -c release
 
 ### First Run
 
-**Important:** Grant Accessibility permission *before* launching Switcher for the first time.
+1. Open **Switcher.app**
+2. When prompted, grant Accessibility permission in **System Settings → Privacy & Security → Accessibility** (toggle Switcher on)
+3. Switcher takes over Cmd+Tab automatically within ~1 second — no relaunch needed
 
-1. Open **System Settings → Privacy & Security → Accessibility**
-2. Click the **+** button and add Switcher.app
-3. Now open Switcher.app
-4. Press Cmd+Tab — that's it
+Until you grant permission, Switcher **leaves your native Cmd+Tab working** and waits, so it can never get stuck. You can quit any time from its menu bar icon (⌘ → Quit).
 
-> **Why?** If you launch first and grant permission via the macOS prompt, the app may hang. You'd need to remove it from Accessibility, quit the app, re-add it, then relaunch.
+> Switcher is ad-hoc signed, so rebuilding/replacing the app can invalidate a previous grant — just remove and re-add it under Accessibility.
 
-### Removing Permissions
+### Removing Permission
 
-**Never remove Switcher from Accessibility while it's running.** Always quit the app first (use Activity Monitor if needed).
+If you turn Switcher's Accessibility permission off while it's running, it automatically restores your native Cmd+Tab and waits for you to re-enable it.
 
-> **Why?** This is a [known macOS bug](https://developer.apple.com/forums/thread/735204): removing Accessibility permission from an app using CGEventTap while it's running can block mouse clicks system-wide, requiring a restart to fix.
+> Note: there's a [known macOS bug](https://developer.apple.com/forums/thread/735204) where removing Accessibility permission from *any* app using CGEventTap while it's running can briefly affect mouse input. Switcher disables its tap as soon as it detects the change to minimize this, but quitting first (menu bar → Quit) is still the cleanest way.
 
 ### Auto-Start
 System Settings → General → Login Items → add Switcher

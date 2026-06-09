@@ -15,6 +15,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     private var statusBarController: StatusBarController!
     private var prefsWindowController: PreferencesWindowController!
 
+    // True once we've taken over Cmd+Tab (event tap live + native Cmd+Tab disabled).
+    private var switchingEnabled = false
+    // Polls for the Accessibility grant while switching is disabled.
+    private var permissionTimer: Timer?
+
     // Key codes
     private let kVK_Tab: UInt16 = 0x30
     private let kVK_Escape: UInt16 = 0x35
@@ -30,13 +35,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         // Start tracking app activation order
         AppListProvider.startObserving()
 
-        // Disable native Cmd+Tab
-        setNativeCommandTabEnabled(false)
-
-        // Setup hotkey manager
+        // Setup hotkey manager (does NOT take over Cmd+Tab yet — see enableSwitching)
         hotkeyManager = HotkeyManager()
         hotkeyManager.delegate = self
-        hotkeyManager.start()
 
         // Create panel (hidden initially)
         panel = AppSwitcherPanel()
@@ -49,7 +50,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         Preferences.registerDefaults()
         Preferences.launchCount += 1
 
-        // Menu bar icon (optional, controlled by preferences)
+        // Menu bar icon (optional, controlled by preferences). Provides a Quit
+        // escape hatch even while we're waiting for Accessibility permission.
         statusBarController = StatusBarController()
         statusBarController.onOpenPreferences = { [weak self] in self?.showPreferences() }
         refreshStatusItem()
@@ -60,6 +62,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
 
         // Start silently; only surface the window when it's time to nag.
         maybeShowDonationNag()
+
+        // Only take over Cmd+Tab once Accessibility permission is confirmed. Until
+        // then, native Cmd+Tab is left working and we poll for the grant — so a
+        // first launch without permission can never leave the system broken.
+        if AccessibilityPermission.isGranted {
+            enableSwitching()
+        } else {
+            AccessibilityPermission.prompt()
+            startPermissionPolling()
+        }
 
         print("SimpleSwitcher started. Press Cmd+Tab to activate.")
     }
@@ -141,6 +153,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         }
         // Click outside just dismisses without activating
         dismissPanel()
+    }
+
+    func accessibilityRevoked() {
+        // Permission was turned off while running — give the user back a working
+        // Cmd+Tab and wait for it to be re-granted.
+        disableSwitching()
     }
 
     func keyPressed(_ keyCode: UInt16) {
@@ -231,6 +249,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         hotkeyManager.isActive = false
         // Unregister active-only hotkeys so Cmd+H/Q work in other apps
         hotkeyManager.unregisterActiveHotkeys()
+    }
+
+    // MARK: - Switching & Accessibility Permission
+
+    /// Take over Cmd+Tab. Creates the event tap FIRST and only disables native
+    /// Cmd+Tab if that succeeded, so a permission failure never breaks the system.
+    private func enableSwitching() {
+        guard !switchingEnabled else { return }
+        guard hotkeyManager.tryCreateEventTap() else { return }  // permission gate
+        setNativeCommandTabEnabled(false)
+        hotkeyManager.registerHotkeys()
+        switchingEnabled = true
+        print("Switching enabled.")
+    }
+
+    /// Hand Cmd+Tab back to macOS and wait for permission to return. Called when
+    /// Accessibility is revoked while running.
+    private func disableSwitching() {
+        guard switchingEnabled else { return }
+        setNativeCommandTabEnabled(true)
+        hotkeyManager.stop()
+        switchingEnabled = false
+        print("Switching disabled (Accessibility permission lost). Waiting for re-grant…")
+        startPermissionPolling()
+    }
+
+    private func startPermissionPolling() {
+        guard permissionTimer == nil else { return }
+        // .common mode so the donation NSAlert.runModal() can't pause the poll.
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] t in
+            guard AccessibilityPermission.isGranted else { return }
+            t.invalidate()
+            self?.permissionTimer = nil
+            self?.enableSwitching()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        permissionTimer = timer
     }
 
     // MARK: - Preferences & Menu Bar
