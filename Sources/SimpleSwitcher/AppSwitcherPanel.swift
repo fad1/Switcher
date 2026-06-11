@@ -119,16 +119,9 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     // MARK: - Public Methods
 
     func showWithApps(_ apps: [AppInfo], selectIndex: Int = 1) {
-        // Clear existing views
-        appViews.forEach { $0.removeFromSuperview() }
-        appViews.removeAll()
-        rows.removeAll()
-
-        // Clear existing row stack views
-        for subview in verticalStackView.arrangedSubviews {
-            verticalStackView.removeArrangedSubview(subview)
-            subview.removeFromSuperview()
-        }
+        // Clear any leftover views (normally already cleared on hide). The panel
+        // is rebuilt from scratch every open, so this is just defensive.
+        clearAppViews()
 
         // Find screen containing mouse cursor
         let mouseLocation = NSEvent.mouseLocation
@@ -292,6 +285,21 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         deadZoneInitialPosition = nil
         isAllowedToMouseHover = false
         orderOut(nil)
+        // Release the item views (and their icon image references) while closed,
+        // so they don't sit resident between switches. The next open rebuilds
+        // everything anyway, so this costs no rebuild latency.
+        clearAppViews()
+    }
+
+    /// Tear down all app item views and their containing row stack views.
+    private func clearAppViews() {
+        appViews.forEach { $0.removeFromSuperview() }
+        appViews.removeAll()
+        rows.removeAll()
+        for subview in verticalStackView.arrangedSubviews {
+            verticalStackView.removeArrangedSubview(subview)
+            subview.removeFromSuperview()
+        }
     }
 
     func selectNext() {
