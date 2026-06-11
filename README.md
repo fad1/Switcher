@@ -98,6 +98,8 @@ launching Switcher again while it's already running. The window lets you:
 - **Grayscale icons** — show app icons without color (applies on the next Cmd+Tab)
 - **Donate** — support development
 
+The menu bar icon (⌘) also has a quick **Grayscale Icons** toggle, plus Preferences, Donate, and Quit.
+
 Grayscale can still be set from the terminal if you prefer:
 ```bash
 defaults write com.simpleswitcher.app grayscaleIcons -bool true   # enable
@@ -110,7 +112,7 @@ defaults delete com.simpleswitcher.app grayscaleIcons             # revert
 
 ## Technical Details
 
-~900 lines of Swift. No dependencies. Uses:
+~1,900 lines of Swift across 12 files. No dependencies. Uses:
 - Carbon hotkeys (avoids Input Monitoring requirement)
 - CGEvent tap for modifier detection
 - Private `CGSSetSymbolicHotKeyEnabled` API to intercept native Cmd+Tab

@@ -9,7 +9,7 @@ Switcher intercepts the native Cmd+Tab hotkey and displays a custom switcher pan
 - Apps with only minimized windows
 - Background-only apps
 
-**Total codebase: ~1250 lines across 12 Swift files**
+**Total codebase: ~1900 lines across 12 Swift files**
 
 ## Architecture
 
