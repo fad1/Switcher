@@ -29,6 +29,11 @@ class HotkeyManager {
     // Serial queue for thread-safe state access
     private let stateQueue = DispatchQueue(label: "com.simpleswitcher.state")
 
+    // Backstop watchdog (see startCmdWatchdog) — polls live modifier state while
+    // the panel is active in case the .listenOnly tap drops the Cmd-up event.
+    private var cmdWatchdog: DispatchSourceTimer?
+    private let watchdogQueue = DispatchQueue(label: "com.simpleswitcher.cmdwatchdog")
+
     // State protected by stateQueue
     private var _isActive = false
     private var _shiftWasDown = false
@@ -118,16 +123,53 @@ class HotkeyManager {
             RegisterEventHotKey(UInt32(keyCode), UInt32(cmdKey), id, eventTarget, UInt32(kEventHotKeyNoOptions), &ref)
             activeHotKeyRefs.append(ref)
         }
+
+        // Second layer of the sticky-panel defense (the dedicated tap thread is
+        // the first): a poll that dismisses even if the Cmd-up event is dropped.
+        startCmdWatchdog()
     }
 
     /// Unregister active-only hotkeys so they work normally in other apps
     func unregisterActiveHotkeys() {
+        stopCmdWatchdog()
         for ref in activeHotKeyRefs {
             if let ref = ref {
                 UnregisterEventHotKey(ref)
             }
         }
         activeHotKeyRefs.removeAll()
+    }
+
+    // MARK: - Cmd-release Watchdog
+
+    /// Backstop for a dropped Cmd-up event. Dismissal normally rides the
+    /// `.listenOnly` tap's flagsChanged callback, but that single event can be
+    /// lost — e.g. macOS disables the tap by timeout exactly as Cmd is released
+    /// (re-enabled only afterward) — which leaves the panel stuck open. While the
+    /// panel is active, poll the *live* modifier state and dismiss the moment Cmd
+    /// is no longer physically held, independent of event delivery. The tap stays
+    /// the instant primary path; this only catches the miss (worst case ~100ms).
+    private func startCmdWatchdog() {
+        guard cmdWatchdog == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: watchdogQueue)
+        timer.schedule(deadline: .now() + 0.1, repeating: 0.1, leeway: .milliseconds(20))
+        timer.setEventHandler { [weak self] in
+            guard let self = self, self.isActive else { return }
+            let cmdDown = CGEventSource.flagsState(.combinedSessionState).contains(.maskCommand)
+            if !cmdDown {
+                self.isActive = false  // mirror the tap's immediate-set
+                DispatchQueue.main.async {
+                    self.delegate?.modifierKeyReleased()
+                }
+            }
+        }
+        cmdWatchdog = timer
+        timer.resume()
+    }
+
+    private func stopCmdWatchdog() {
+        cmdWatchdog?.cancel()
+        cmdWatchdog = nil
     }
 
     // MARK: - Carbon Hotkey Registration
