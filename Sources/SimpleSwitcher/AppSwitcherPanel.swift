@@ -16,9 +16,10 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
 
     // Subtle "hide others to declutter" reminder shown at the bottom of the panel
     // only when the switcher has grown cluttered (2+ rows) and the pref is enabled.
-    // Reused across opens; kept out of the `rows` array so navigation/hit-testing
-    // never treat it as an app. See updateHint.
-    private var hintLabel: NSTextField?
+    // Renders as plain text at rest and reveals itself as a clickable pill button
+    // on hover (see DeclutterHintView). Reused across opens; kept out of the
+    // `rows` array so navigation/hit-testing never treat it as an app. See updateHint.
+    private var hintView: DeclutterHintView?
 
     // Dead zone for hover - like AltTab's CursorEvents
     private var deadZoneInitialPosition: NSPoint?
@@ -246,6 +247,9 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         // Hover enabled - update selection if mouse is over panel
         if frame.contains(currentPos) {
             selectAppUnderMouse()
+            updateHintHover()
+        } else {
+            hintView?.setHovered(false)
         }
     }
 
@@ -267,6 +271,24 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
                 }
             }
         }
+    }
+
+    /// Reveal/unreveal the hint's button styling based on the pointer position.
+    /// Only called once the dead zone has been crossed (from handleMouseMoved),
+    /// so the button never flashes just because the panel opened under the cursor.
+    private func updateHintHover() {
+        guard let hint = hintView, hint.superview != nil else { return }
+        let windowPoint = mouseLocationOutsideOfEventStream
+        hint.setHovered(hint.convert(hint.bounds, to: nil).contains(windowPoint))
+    }
+
+    /// True when the pointer is on the hint AND the hint is currently revealed
+    /// as a button. Requiring the revealed state means a click can only trigger
+    /// Hide Others after the hover styling made the consequence visible —
+    /// a stray click just below the bottom icon row can't hide everything.
+    func isMouseOverHintButton() -> Bool {
+        guard let hint = hintView, hint.superview != nil, hint.isHovered else { return false }
+        return hint.convert(hint.bounds, to: nil).contains(mouseLocationOutsideOfEventStream)
     }
 
     /// App under the current mouse position, independent of dead-zone hover state.
@@ -298,6 +320,8 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         stopMouseMonitor()
         deadZoneInitialPosition = nil
         isAllowedToMouseHover = false
+        // Also restores the arrow cursor if the panel closes mid-hover.
+        hintView?.setHovered(false)
         orderOut(nil)
         // Release the item views (and their icon image references) while closed,
         // so they don't sit resident between switches. The next open rebuilds
@@ -477,7 +501,7 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
 
         // Detach the hint (it's the last arranged subview) so new rows append before
         // it; updateHint() re-adds it last afterward.
-        if let existing = hintLabel, existing.superview != nil {
+        if let existing = hintView, existing.superview != nil {
             verticalStackView.removeArrangedSubview(existing)
             existing.removeFromSuperview()
         }
@@ -535,9 +559,9 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         let maxRowCount = rows.map { $0.count }.max() ?? 1
         var width = CGFloat(maxRowCount) * itemSize + CGFloat(maxRowCount - 1) * itemSpacing + panelPadding * 2
         var height = CGFloat(rowCount) * itemSize + CGFloat(rowCount - 1) * rowSpacing + panelPadding * 2
-        if showingHint, let label = hintLabel {
-            let hintSize = label.fittingSize
-            height += rowSpacing + hintSize.height        // stack spacing + label
+        if showingHint, let hint = hintView {
+            let hintSize = hint.fittingSize
+            height += rowSpacing + hintSize.height        // stack spacing + hint pill
             width = max(width, hintSize.width + panelPadding * 2)  // don't clip a wide hint
         }
         return CGSize(width: width, height: height)
@@ -549,24 +573,18 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     @discardableResult
     private func updateHint() -> Bool {
         // Always detach first: avoids a double-add and keeps hide/rebuild clean.
-        if let existing = hintLabel, existing.superview != nil {
+        // Unhovering here also drops stale button styling across rebuilds/resizes;
+        // the next mouse move re-reveals it if the pointer is still on the hint.
+        if let existing = hintView, existing.superview != nil {
+            existing.setHovered(false)
             verticalStackView.removeArrangedSubview(existing)
             existing.removeFromSuperview()
         }
         guard Preferences.showDeclutterTip, rows.count >= 2 else { return false }
-        let label = hintLabel ?? makeHintLabel()
-        hintLabel = label
-        verticalStackView.addArrangedSubview(label)
+        let view = hintView ?? DeclutterHintView()
+        hintView = view
+        verticalStackView.addArrangedSubview(view)
         return true
-    }
-
-    private func makeHintLabel() -> NSTextField {
-        let label = NSTextField(labelWithString: "⌥⌘H · Hide others — fewer icons here")
-        label.font = NSFont.systemFont(ofSize: 11)
-        label.textColor = .secondaryLabelColor
-        label.alignment = .center
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
     }
 
     private func updateSelection() {
@@ -597,6 +615,64 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
 private extension Array {
     subscript(safe index: Index) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+// MARK: - Declutter Hint View
+
+/// The declutter tip at the bottom of the panel. Looks like a plain caption at
+/// rest; once the pointer is over it (past the dead zone) it reveals itself as
+/// a pill button — same highlight as a selected app — with a pointing-hand
+/// cursor. The pill hugs the text (a few points of padding), so the clickable
+/// area stays narrow. Clicks are routed by AppDelegate.mouseClicked via
+/// isMouseOverHintButton(); this view draws, it doesn't handle events.
+private class DeclutterHintView: NSView {
+    private let label: NSTextField
+    private(set) var isHovered = false
+
+    private let horizontalPadding: CGFloat = 9
+    private let verticalPadding: CGFloat = 4
+
+    init() {
+        label = NSTextField(labelWithString: "⌥⌘H · Hide others — fewer icons here")
+        label.font = NSFont.systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        super.init(frame: .zero)
+        wantsLayer = true
+        translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = bounds.height / 2  // full pill
+    }
+
+    func setHovered(_ hovered: Bool) {
+        guard hovered != isHovered else { return }
+        isHovered = hovered
+        layer?.backgroundColor = hovered ? NSColor.white.withAlphaComponent(0.3).cgColor : nil
+        label.textColor = hovered ? .labelColor : .secondaryLabelColor
+        // The panel never becomes key, so cursor rects don't fire; set directly.
+        if hovered {
+            NSCursor.pointingHand.set()
+        } else {
+            NSCursor.arrow.set()
+        }
     }
 }
 

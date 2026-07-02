@@ -160,6 +160,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         let mouseLocation = NSEvent.mouseLocation
 
         if panel.frame.contains(mouseLocation) {
+            // The declutter hint acts as a button, but only while visibly
+            // revealed by hover — so this can't fire from a stray click that
+            // missed the bottom icon row.
+            if panel.isMouseOverHintButton() {
+                hideOtherApps()
+                dismissPanel()
+                return
+            }
             // Activate the app under the cursor — a click is deliberate, so it
             // ignores dead-zone hover state. Fall back to the keyboard selection
             // only if the click missed all icons (gap/padding inside the panel).
