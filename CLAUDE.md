@@ -198,6 +198,7 @@ This creates `Switcher.app` which can be moved to `/Applications`.
 | Up Arrow | Select app in row above (multi-row only) |
 | Down Arrow | Select app in row below (multi-row only) |
 | H | Hide selected app |
+| ⌥⌘H | Hide all other apps (declutter), then dismiss |
 | Q | Quit selected app |
 | Return | Activate selected app |
 | Escape | Dismiss without switching |
@@ -208,6 +209,7 @@ This creates `Switcher.app` which can be moved to `/Applications`.
 - **Hover**: Disabled until mouse moves 3+ pixels from initial position (prevents accidental selection when panel appears under cursor)
 - **Click inside panel**: Activates the clicked app
 - **Click outside panel**: Dismisses without switching
+- **Declutter tip button**: the "⌥⌘H · Hide others" tip (shown at 2+ rows, `DeclutterHintView`) reveals itself as a pill button on hover; clicking it runs Hide Others. Clicks only count while the button is visibly revealed, so stray clicks below the icon rows can't hide everything
 
 ## Known Limitations
 
