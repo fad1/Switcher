@@ -330,9 +330,10 @@ class HotkeyManager {
                         manager.delegate?.mouseClicked(at: location)
                     }
                     // NOTE: the tap is .listenOnly (so revoking Accessibility can
-                    // never freeze input), which means we CANNOT consume the click
-                    // — it also reaches whatever is under the cursor. Keyboard use
-                    // is unaffected; this only matters for click-to-dismiss.
+                    // never freeze input), which means we CANNOT consume the click.
+                    // Clicks outside the panel are swallowed by AppSwitcherPanel's
+                    // per-screen click shields instead; this callback stays the
+                    // primary dismiss/activate path.
                 }
             } else if type == .tapDisabledByUserInput || type == .tapDisabledByTimeout {
                 // Benign: macOS disables the tap after heavy input or a timeout —

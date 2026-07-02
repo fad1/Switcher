@@ -2,6 +2,8 @@ import Cocoa
 
 protocol AppSwitcherPanelDelegate: AnyObject {
     func panelDidSelectApp(_ app: AppInfo)
+    /// A click landed on a click shield (outside the panel) — dismiss, like Escape.
+    func panelDidRequestDismiss()
 }
 
 class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
@@ -25,6 +27,10 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     private var deadZoneInitialPosition: NSPoint?
     private var isAllowedToMouseHover = false
     private var mouseMonitor: Any?
+
+    // Invisible per-screen panels that swallow clicks outside the switcher while
+    // it's open (the .listenOnly tap can't consume them). See showClickShields.
+    private var clickShields: [ClickShieldPanel] = []
 
     // Recomputed per show based on the target screen (see iconSize(for:)).
     private var itemSize: CGFloat = 76
@@ -74,7 +80,9 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     }
 
     private func setupVisualEffectView() {
-        visualEffectView = NSVisualEffectView()
+        let effectView = HoverTrackingVisualEffectView()
+        effectView.onMouseMovement = { [weak self] in self?.handleMouseMoved() }
+        visualEffectView = effectView
         visualEffectView.material = .hudWindow
         visualEffectView.state = .active
         visualEffectView.blendingMode = .behindWindow
@@ -204,6 +212,7 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         isAllowedToMouseHover = false
         startMouseMonitor()
 
+        showClickShields()
         orderFront(nil)
     }
 
@@ -316,8 +325,35 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         }
     }
 
+    // MARK: - Click Shields
+
+    /// Cover every screen with an invisible panel one window level below the
+    /// switcher while it's open. The event tap is .listenOnly and cannot consume
+    /// events, so without these a click outside the panel would also land in the
+    /// app under the cursor. The shields catch that click via ordinary
+    /// window-server routing (no permissions involved) and request a dismiss —
+    /// click-away behaves like Escape. Clicks on the switcher itself are
+    /// unaffected: it floats above the shields.
+    /// Recreated per open (screens can change) and released on hide so their
+    /// full-screen backing stores don't stay resident between switches.
+    private func showClickShields() {
+        hideClickShields()
+        for screen in NSScreen.screens {
+            let shield = ClickShieldPanel(screenFrame: screen.frame)
+            shield.onClick = { [weak self] in self?.panelDelegate?.panelDidRequestDismiss() }
+            shield.orderFront(nil)
+            clickShields.append(shield)
+        }
+    }
+
+    private func hideClickShields() {
+        clickShields.forEach { $0.orderOut(nil) }
+        clickShields.removeAll()
+    }
+
     func hidePanel() {
         stopMouseMonitor()
+        hideClickShields()
         deadZoneInitialPosition = nil
         isAllowedToMouseHover = false
         // Also restores the arrow cursor if the panel closes mid-hover.
@@ -674,6 +710,88 @@ private class DeclutterHintView: NSView {
             NSCursor.arrow.set()
         }
     }
+}
+
+// MARK: - Hover Tracking Effect View
+
+/// The panel's content view; forwards any mouse movement over the panel to the
+/// hover logic. Hover normally rides a global mouseMoved monitor, but global
+/// monitors never see the app's OWN events — so when Switcher itself is the
+/// active app (e.g. Cmd+Tab right after using the Preferences window) the
+/// monitor goes silent and hover selection dies. This tracking area fires
+/// regardless of which app is active. Both paths call handleMouseMoved, which
+/// is idempotent, so double delivery is harmless.
+private class HoverTrackingVisualEffectView: NSVisualEffectView {
+    var onMouseMovement: (() -> Void)?
+    private var hoverTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area = hoverTrackingArea { removeTrackingArea(area) }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) { onMouseMovement?() }
+    override func mouseEntered(with event: NSEvent) { onMouseMovement?() }
+    override func mouseExited(with event: NSEvent) { onMouseMovement?() }
+}
+
+// MARK: - Click Shield
+
+/// Invisible, non-activating panel covering one screen just below the switcher.
+/// Swallows clicks that would otherwise fall through to the app behind the
+/// panel and reports them so the switcher can dismiss.
+private class ClickShieldPanel: NSPanel {
+    var onClick: (() -> Void)?
+
+    init(screenFrame: NSRect) {
+        super.init(
+            contentRect: screenFrame,
+            styleMask: [.nonactivatingPanel, .borderless],
+            backing: .buffered,
+            defer: false
+        )
+        // One notch below the switcher panel (.popUpMenu) so it never covers it.
+        level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue - 1)
+        isFloatingPanel = true
+        hidesOnDeactivate = false
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        isOpaque = false
+        hasShadow = false
+        isReleasedWhenClosed = false
+        // Not .clear: the window server treats fully transparent windows as
+        // click-through; a hair of alpha keeps clicks landing here. Explicitly
+        // setting ignoresMouseEvents=false also opts out of that automatism.
+        backgroundColor = NSColor.black.withAlphaComponent(0.001)
+        ignoresMouseEvents = false
+        contentView = ClickShieldView(onClick: { [weak self] in self?.onClick?() })
+    }
+}
+
+private class ClickShieldView: NSView {
+    private let onClick: () -> Void
+
+    init(onClick: @escaping () -> Void) {
+        self.onClick = onClick
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    // The shield is non-activating and never key, so the first click must count.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { onClick() }
+    override func rightMouseDown(with event: NSEvent) { onClick() }
+    override func otherMouseDown(with event: NSEvent) { onClick() }
 }
 
 // MARK: - Appearance Adaptive View

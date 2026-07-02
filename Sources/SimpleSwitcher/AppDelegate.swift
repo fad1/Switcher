@@ -236,6 +236,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         dismissPanel()
     }
 
+    /// A click was swallowed by a click shield (outside the panel). The tap's
+    /// mouseClicked usually dismisses first; this is the shield-side path so the
+    /// panel still closes if the tap misses the event. Both are state-guarded.
+    func panelDidRequestDismiss() {
+        guard state == .active else { return }
+        dismissPanel()
+    }
+
     // MARK: - Private Methods
 
     private func activateApp(_ appInfo: AppInfo) {

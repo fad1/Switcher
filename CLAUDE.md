@@ -51,7 +51,7 @@ Sources/SimpleSwitcher/
 **HotkeyManager.swift**
 - Registers Cmd+Tab globally (via `registerHotkeys()`, called by AppDelegate once permission is confirmed)
 - `tryCreateEventTap() -> Bool`: creates the CGEvent tap; returns false when Accessibility permission is missing (the gate AppDelegate checks before touching native Cmd+Tab). Idempotent.
-- **`.listenOnly` (passive) CGEvent tap**: the window server never waits on it, so revoking Accessibility while it's alive cannot freeze input (an active `.defaultTap` can — forums thread 735204). Trade-off: a passive tap can't consume events, so clicks aren't swallowed (clicking outside the open switcher to dismiss also passes through to whatever's behind it).
+- **`.listenOnly` (passive) CGEvent tap**: the window server never waits on it, so revoking Accessibility while it's alive cannot freeze input (an active `.defaultTap` can — forums thread 735204). Trade-off: a passive tap can't consume events — outside clicks are instead swallowed by AppSwitcherPanel's invisible per-screen click-shield windows (see below), which turn click-away into a plain dismiss.
 - On `tapDisabledByUserInput`/`tapDisabledByTimeout` (benign throttling) it just re-enables the tap
 - **Sticky-panel defense (two layers)**: dismissal rides the tap's Cmd-up `flagsChanged`, but that single event can be dropped (e.g. tap disabled by timeout at the instant of release), leaving the panel stuck open. Layer 1: the tap runs on a dedicated high-priority thread so its callback isn't starved by main-thread UI work. Layer 2: `startCmdWatchdog()` — a ~100ms poll of `CGEventSource.flagsState(.combinedSessionState)` that runs only while the panel is active (started in `registerActiveHotkeys()`, stopped in `unregisterActiveHotkeys()`) and dismisses if Cmd is no longer physically held, independent of event delivery. Double-dismiss is safe: both paths hit the serial main queue and `modifierKeyReleased()`/`dismissPanel()` guard on state.
 - Dynamically registers/unregisters other hotkeys (H, Q, arrows, Escape, Return) when panel is shown/hidden
@@ -76,6 +76,8 @@ Sources/SimpleSwitcher/
 - **Multi-row layout**: Uses max 85% of screen width; wraps to additional rows when many apps are open
 - Manages selection state with row/column tracking for grid navigation
 - **Dead zone hover**: Ignores mouse position when panel appears; hover only enabled after 3px mouse movement (prevents accidental selection)
+- **Hover has two event sources**: a global mouseMoved monitor AND an `.activeAlways` tracking area on the panel content (`HoverTrackingVisualEffectView`). The tracking area is required because global monitors never see the app's own events — when Switcher itself is active (e.g. Cmd+Tab right after using Preferences) the monitor is silent and hover would otherwise be dead
+- **Click shields**: while the panel is open, invisible non-activating panels cover every screen one window level below it, swallowing clicks outside the panel (the `.listenOnly` tap can't consume them) and requesting a dismiss — click-away behaves like Escape and never reaches the app behind
 - Uses `mouseLocationOutsideOfEventStream` for accurate mouse position in non-activating panel
 
 **AppItemView.swift**
@@ -208,7 +210,7 @@ This creates `Switcher.app` which can be moved to `/Applications`.
 
 - **Hover**: Disabled until mouse moves 3+ pixels from initial position (prevents accidental selection when panel appears under cursor)
 - **Click inside panel**: Activates the clicked app
-- **Click outside panel**: Dismisses without switching
+- **Click outside panel**: Dismisses without switching; the click is swallowed by an invisible shield window and does NOT reach the app behind
 - **Declutter tip button**: the "⌥⌘H · Hide others" tip (shown at 2+ rows, `DeclutterHintView`) reveals itself as a pill button on hover; clicking it runs Hide Others. Clicks only count while the button is visibly revealed, so stray clicks below the icon rows can't hide everything
 
 ## Known Limitations
