@@ -6,8 +6,11 @@ A minimal Cmd+Tab replacement for macOS. Shows only apps with visible windows, o
 
 Switcher intercepts the native Cmd+Tab hotkey and displays a custom switcher panel. It filters out:
 - Hidden apps
-- Apps with only minimized windows
 - Background-only apps
+
+It also includes apps with a Dock badge (e.g. Mail with an unread count) even if they have no open window.
+
+**Apps with only minimized windows are NOT filtered out** (verified empirically 2026-07): a minimized window is off-screen in CGWindowList terms, but so is a window on another Space, and the off-screen branch must accept those — CGWindowList alone cannot tell the two apart. True minimized filtering would need per-window AX checks (`AXMinimized`), like AltTab. See Known Limitations.
 
 **Total codebase: ~1900 lines across 12 Swift files**
 
@@ -49,7 +52,8 @@ Sources/SimpleSwitcher/
   - **`AXIsProcessTrusted()` caches per process**: macOS keeps reporting a running app as trusted even after permission is revoked, until relaunch. So the revoke branch usually does NOT fire — the app keeps working until relaunched. This is harmless now that the tap is passive. Grant detection (the path that matters) works fine.
 
 **HotkeyManager.swift**
-- Registers Cmd+Tab globally (via `registerHotkeys()`, called by AppDelegate once permission is confirmed)
+- Registers Cmd+Tab AND Cmd+Shift+Tab globally (via `registerHotkeys()`, called by AppDelegate once permission is confirmed). Carbon hotkeys need an exact modifier match, so the Shift variant is its own registration — without it Cmd+Shift+Tab (whose native handler we disable) would do nothing. From idle it opens the panel selecting the LAST app (reverse/wrap-around); while open, Shift+Tab steps backward.
+- **Shift-tap vs Shift+Tab disambiguation**: the legacy "tap Shift to go back" gesture fires on Shift *release*, and only if no Cmd+Shift+Tab fired during the hold (`tabSeenDuringShift`). Firing on press would double-step every Shift+Tab.
 - `tryCreateEventTap() -> Bool`: creates the CGEvent tap; returns false when Accessibility permission is missing (the gate AppDelegate checks before touching native Cmd+Tab). Idempotent.
 - **`.listenOnly` (passive) CGEvent tap**: the window server never waits on it, so revoking Accessibility while it's alive cannot freeze input (an active `.defaultTap` can — forums thread 735204). Trade-off: a passive tap can't consume events — outside clicks are instead swallowed by AppSwitcherPanel's invisible per-screen click-shield windows (see below), which turn click-away into a plain dismiss.
 - On `tapDisabledByUserInput`/`tapDisabledByTimeout` (benign throttling) it just re-enables the tap
@@ -58,16 +62,17 @@ Sources/SimpleSwitcher/
   - `registerActiveHotkeys()` called when panel opens
   - `unregisterActiveHotkeys()` called when panel closes
   - This ensures Cmd+H/Q work normally in other apps when panel is not showing
-- Tap monitors (read-only): flagsChanged (Cmd release / Shift) and mouseDown (forward click location to delegate)
+- Tap monitors (read-only): flagsChanged (Cmd release / Shift) and mouseDown (notify delegate of clicks while active)
 - **Note**: Uses Carbon hotkeys instead of CGEvent keyDown to avoid requiring Input Monitoring permission (only Accessibility needed)
 - **Thread safety**: Uses `DispatchQueue` for synchronized access to `isActive` state
 - **Critical**: Sets `isActive` synchronously in event handlers before async delegate calls to avoid race conditions in release builds
 
 **AppListProvider.swift**
 - Maintains MRU (Most Recently Used) order via NSWorkspace notifications
-- `getVisibleApps()`: Returns apps with on-screen windows, sorted by MRU
+- `getVisibleApps()`: Returns apps with visible windows OR a Dock badge, sorted by MRU
 - Uses CGWindowListCopyWindowInfo to find visible windows
-- Filters: layer == 0, isOnScreen == true, valid bounds
+- Filters: 0 <= layer <= 20, bounds >= 50x50; off-screen windows accepted if they have an owner name (covers other Spaces — and, unavoidably, minimized windows; see Project Overview)
+- **Dock badge scan is cached (~2s TTL)**: `getDockBadges()` walks the Dock's AX tree (several IPC round-trips per dock item, on the main thread), and `getVisibleApps()` runs on every Cmd+Tab press plus every 300ms while the panel is open — `getDockBadgesCached()` keeps that off the hot path
 
 **AppSwitcherPanel.swift**
 - NSPanel with `.nonactivatingPanel` style (doesn't steal focus)
@@ -104,7 +109,7 @@ Sources/SimpleSwitcher/
 
 **Preferences / menu bar / donation flow (AppDelegate)**
 - App starts silently — the Preferences window does NOT auto-open on every launch
-- On startup it auto-surfaces (with a Donate / Maybe Later prompt) only when `!hasDonated && launchCount % 5 == 0`
+- On startup it auto-surfaces (with a Donate / Maybe Later prompt) only when `!hasDonated && launchCount % 5 == 0`. The nag is deferred (async, after `enableSwitching`/`startPermissionMonitor`) because `runModal()` would otherwise block the Cmd+Tab takeover until answered
 - On demand: the menu bar Preferences… item, or relaunching the app (`applicationShouldHandleReopen` surfaces the window)
 - `applicationShouldTerminateAfterLastWindowClosed` returns false so closing Preferences keeps the agent running
 
@@ -191,10 +196,13 @@ This creates `Switcher.app` which can be moved to `/Applications`.
 
 ## Keyboard Shortcuts (while panel is open)
 
+Cmd+Shift+Tab from **idle** opens the switcher selecting the last (least recently used) app, mirroring the native reverse gesture.
+
 | Key | Action |
 |-----|--------|
 | Tab | Select next app |
-| Shift | Select previous app |
+| Shift+Tab | Select previous app |
+| Shift (tap, no Tab) | Select previous app (fires on Shift release) |
 | Left Arrow | Select previous app |
 | Right Arrow | Select next app |
 | Up Arrow | Select app in row above (multi-row only) |
@@ -219,6 +227,7 @@ This creates `Switcher.app` which can be moved to `/Applications`.
 2. **No per-window switching** - Shows apps, not individual windows
 3. **Ad-hoc signed only** - Not notarized, may trigger Gatekeeper warning on first run
 4. **Private API usage** - CGSSetSymbolicHotKeyEnabled may break in future macOS
+5. **Minimized-only apps still appear** - CGWindowList can't distinguish a minimized window from one on another Space (both off-screen); filtering them would need per-window AX `AXMinimized` checks
 
 ## Threading Notes
 

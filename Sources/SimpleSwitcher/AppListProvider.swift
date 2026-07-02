@@ -68,7 +68,7 @@ class AppListProvider {
         let visiblePIDs = getVisibleWindowPIDs()
 
         // Get dock badges for all running apps
-        let badges = getDockBadges()
+        let badges = getDockBadgesCached()
 
         // Get current app's PID to exclude self
         let selfPID = ProcessInfo.processInfo.processIdentifier
@@ -93,10 +93,11 @@ class AppListProvider {
 
             guard hasVisibleWindow || hasBadge else { return nil }
 
-            // Get app info
+            // Get app info. The icon's logical size is left alone: AppItemView
+            // sizes it via constraints (mutating app.icon would touch a shared
+            // NSImage), and the reps carry the resolution regardless.
             let name = app.localizedName ?? "Unknown"
             let icon = app.icon ?? NSImage(named: NSImage.applicationIconName) ?? NSImage()
-            icon.size = NSSize(width: 64, height: 64)
 
             return AppInfo(app: app, name: name, icon: icon, pid: app.processIdentifier, badge: badge)
         }
@@ -159,6 +160,23 @@ class AppListProvider {
         }
 
         return pids
+    }
+
+    // The badge scan walks the Dock's AX tree — several IPC round-trips per dock
+    // item, on the main thread. getVisibleApps runs on every Cmd+Tab press AND
+    // every 300ms while the panel is open (AppDelegate's live refresh), so cache
+    // the result briefly instead of re-walking each time. Badges changing within
+    // the TTL just show ~2s late on the next open — invisible in practice.
+    private static var badgeCache: (badges: [String: String], at: Date)?
+    private static let badgeCacheTTL: TimeInterval = 2.0
+
+    private static func getDockBadgesCached() -> [String: String] {
+        if let cache = badgeCache, Date().timeIntervalSince(cache.at) < badgeCacheTTL {
+            return cache.badges
+        }
+        let fresh = getDockBadges()
+        badgeCache = (fresh, Date())
+        return fresh
     }
 
     /// Gets dock badges (notification counts) for running apps

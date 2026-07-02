@@ -11,7 +11,7 @@ let package = Package(
             name: "SimpleSwitcher",
             path: "Sources/SimpleSwitcher",
             linkerSettings: [
-                .unsafeFlags(["-framework", "Carbon"])
+                .linkedFramework("Carbon")
             ]
         )
     ]

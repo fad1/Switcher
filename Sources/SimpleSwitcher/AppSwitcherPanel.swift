@@ -28,6 +28,16 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     private var isAllowedToMouseHover = false
     private var mouseMonitor: Any?
 
+    // Mid-open resizes (remove/append) can fire spurious mouseEntered events,
+    // so hover is suppressed for ~100ms around them (see
+    // suppressHoverDuringResize). The token pairs each delayed restore with its
+    // own suppression and the pre-suppression value is captured only by the
+    // outermost call, so overlapping suppressions (H twice quickly, or a
+    // live-refresh append during a removal) can't clobber each other and leave
+    // hover stuck off.
+    private var hoverSuppressionToken = 0
+    private var hoverAllowedBeforeSuppression: Bool?
+
     // Invisible per-screen panels that swallow clicks outside the switcher while
     // it's open (the .listenOnly tap can't consume them). See showClickShields.
     private var clickShields: [ClickShieldPanel] = []
@@ -210,6 +220,7 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         // Reset dead zone - hover will be enabled after mouse moves 3+ pixels
         deadZoneInitialPosition = nil
         isAllowedToMouseHover = false
+        cancelHoverSuppression()
         startMouseMonitor()
 
         showClickShields()
@@ -356,6 +367,7 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         hideClickShields()
         deadZoneInitialPosition = nil
         isAllowedToMouseHover = false
+        cancelHoverSuppression()
         // Also restores the arrow cursor if the panel closes mid-hover.
         hintView?.setHovered(false)
         orderOut(nil)
@@ -458,8 +470,7 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         let removedApp = removedView.appInfo
 
         // Temporarily disable hover during removal (panel resize can trigger mouseEntered)
-        let wasAllowed = isAllowedToMouseHover
-        isAllowedToMouseHover = false
+        suppressHoverDuringResize()
 
         // Remove from flat list
         if let flatIndex = appViews.firstIndex(where: { $0 === removedView }) {
@@ -501,24 +512,8 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
 
         // Update panel size (hint may drop off if we fell below 2 rows)
         if !rows.isEmpty {
-            let showingHint = updateHint()
-            let size = panelSize(showingHint: showingHint)
-
-            var frame = self.frame
-            let centerX = frame.midX
-            let centerY = frame.midY
-            frame.size.width = size.width
-            frame.size.height = size.height
-            frame.origin.x = centerX - size.width / 2
-            frame.origin.y = centerY - size.height / 2
-            setFrame(frame, display: true)
-
+            resizeKeepingCenter()
             updateSelection()
-        }
-
-        // Restore hover state after a brief delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.isAllowedToMouseHover = wasAllowed
         }
 
         return removedApp
@@ -532,8 +527,7 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         guard !apps.isEmpty, !rows.isEmpty else { return }
 
         // The resize below can trigger a spurious mouseEntered; suppress hover briefly.
-        let wasAllowed = isAllowedToMouseHover
-        isAllowedToMouseHover = false
+        suppressHoverDuringResize()
 
         // Detach the hint (it's the last arranged subview) so new rows append before
         // it; updateHint() re-adds it last afterward.
@@ -560,26 +554,10 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
             rows[rows.count - 1].append(itemView)
         }
 
-        // Re-add the hint if warranted, then resize keeping the panel centered
-        // (do NOT recenter on screen — the panel is already placed).
-        let showingHint = updateHint()
-        let size = panelSize(showingHint: showingHint)
-        var frame = self.frame
-        let centerX = frame.midX
-        let centerY = frame.midY
-        frame.size.width = size.width
-        frame.size.height = size.height
-        frame.origin.x = centerX - size.width / 2
-        frame.origin.y = centerY - size.height / 2
-        setFrame(frame, display: true)
+        resizeKeepingCenter()
 
         // Selection indices are unchanged (append-only), just repaint highlight.
         updateSelection()
-
-        // Restore hover after the resize settles.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.isAllowedToMouseHover = wasAllowed
-        }
     }
 
     var hasApps: Bool {
@@ -601,6 +579,47 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
             width = max(width, hintSize.width + panelPadding * 2)  // don't clip a wide hint
         }
         return CGSize(width: width, height: height)
+    }
+
+    /// Re-attach the hint if warranted, then resize to fit the current rows,
+    /// keeping the panel's center fixed (NOT recentering on screen — the panel
+    /// is already placed). Shared by removeSelectedApp and appendApps.
+    private func resizeKeepingCenter() {
+        let showingHint = updateHint()
+        let size = panelSize(showingHint: showingHint)
+        var frame = self.frame
+        let centerX = frame.midX
+        let centerY = frame.midY
+        frame.size = size
+        frame.origin.x = centerX - size.width / 2
+        frame.origin.y = centerY - size.height / 2
+        setFrame(frame, display: true)
+    }
+
+    /// Suppress hover briefly around a mid-open resize, restoring the
+    /// pre-suppression value once things settle (see the token/value members).
+    private func suppressHoverDuringResize() {
+        if hoverAllowedBeforeSuppression == nil {
+            hoverAllowedBeforeSuppression = isAllowedToMouseHover
+        }
+        isAllowedToMouseHover = false
+        hoverSuppressionToken += 1
+        let token = hoverSuppressionToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self = self, self.hoverSuppressionToken == token else { return }
+            if let allowed = self.hoverAllowedBeforeSuppression {
+                self.isAllowedToMouseHover = allowed
+                self.hoverAllowedBeforeSuppression = nil
+            }
+        }
+    }
+
+    /// Drop any pending hover restore. Called when the panel opens or closes,
+    /// where hover state is reset wholesale — a stale restore from the previous
+    /// open must not re-enable hover past the fresh dead zone.
+    private func cancelHoverSuppression() {
+        hoverSuppressionToken += 1
+        hoverAllowedBeforeSuppression = nil
     }
 
     /// Attach the hint as the last arranged subview when cluttered (2+ rows), else

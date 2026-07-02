@@ -3,11 +3,17 @@ import Carbon
 
 protocol HotkeyManagerDelegate: AnyObject {
     func hotkeyTriggered()
+    /// Cmd+Shift+Tab: open the switcher in reverse (from idle) or step backward
+    /// (while active) — mirrors the native reverse-cycling gesture.
+    func hotkeyTriggeredReverse()
     func modifierKeyReleased()
     func keyPressed(_ keyCode: UInt16)
-    func shiftPressed()
+    /// Shift pressed and released while Cmd is held, with no Shift+Tab in
+    /// between — the legacy "tap Shift to go back" gesture. Fires on release so
+    /// it can't double up with hotkeyTriggeredReverse.
+    func shiftTapped()
     func hideOthersRequested()
-    func mouseClicked(at point: CGPoint)
+    func mouseClicked()
 }
 
 class HotkeyManager {
@@ -19,13 +25,19 @@ class HotkeyManager {
 
     private var hotKeyPressedHandler: EventHandlerRef?
     private var tabHotKeyRef: EventHotKeyRef?
+    private var shiftTabHotKeyRef: EventHotKeyRef?
     private var activeHotKeyRefs: [EventHotKeyRef?] = []
     private var eventTap: CFMachPort?
 
     // Dedicated thread + run loop that services the event tap, so its callback is
     // never starved by main-thread UI work (see setupEventTap for rationale).
     private var eventTapThread: Thread?
-    private var eventTapRunLoop: CFRunLoop?
+    // Written by the tap thread, read by stop() — access only under stateQueue.
+    // The flag covers the startup race: if stop() runs before the thread has
+    // stored its run loop, the thread sees it and exits instead of running
+    // unstoppable forever.
+    private var _eventTapRunLoop: CFRunLoop?
+    private var _tapStopRequested = false
 
     // Serial queue for thread-safe state access
     private let stateQueue = DispatchQueue(label: "com.simpleswitcher.state")
@@ -38,6 +50,7 @@ class HotkeyManager {
     // State protected by stateQueue
     private var _isActive = false
     private var _shiftWasDown = false
+    private var _tabSeenDuringShift = false
 
     var isActive: Bool {
         get { stateQueue.sync { _isActive } }
@@ -47,6 +60,13 @@ class HotkeyManager {
     private var shiftWasDown: Bool {
         get { stateQueue.sync { _shiftWasDown } }
         set { stateQueue.sync { _shiftWasDown = newValue } }
+    }
+
+    // Whether Cmd+Shift+Tab fired during the current Shift hold. Distinguishes
+    // a bare Shift tap (select previous) from Shift held as part of Shift+Tab.
+    private var tabSeenDuringShift: Bool {
+        get { stateQueue.sync { _tabSeenDuringShift } }
+        set { stateQueue.sync { _tabSeenDuringShift = newValue } }
     }
 
     // Hotkey IDs - using actual key codes for easy mapping
@@ -61,6 +81,7 @@ class HotkeyManager {
         case upArrow = 8    // Cmd+Up - previous row
         case downArrow = 9  // Cmd+Down - next row
         case hideOthers = 10 // Cmd+Opt+H - hide all apps except the frontmost
+        case shiftTab = 11  // Cmd+Shift+Tab - activate in reverse/previous
     }
 
     // Map hotkey IDs to key codes for delegate
@@ -94,10 +115,14 @@ class HotkeyManager {
     ]
 
     func stop() {
-        // Unregister tab hotkey
+        // Unregister tab hotkeys
         if let ref = tabHotKeyRef {
             UnregisterEventHotKey(ref)
             tabHotKeyRef = nil
+        }
+        if let ref = shiftTabHotKeyRef {
+            UnregisterEventHotKey(ref)
+            shiftTabHotKeyRef = nil
         }
 
         // Unregister active hotkeys
@@ -112,9 +137,12 @@ class HotkeyManager {
             self.eventTap = nil
         }
         // Stop the dedicated event-tap thread's run loop so the thread can exit
-        if let runLoop = eventTapRunLoop {
-            CFRunLoopStop(runLoop)
-            eventTapRunLoop = nil
+        stateQueue.sync {
+            _tapStopRequested = true
+            if let runLoop = _eventTapRunLoop {
+                CFRunLoopStop(runLoop)
+                _eventTapRunLoop = nil
+            }
         }
         eventTapThread = nil
     }
@@ -246,6 +274,15 @@ class HotkeyManager {
                     DispatchQueue.main.async {
                         manager.delegate?.hotkeyTriggered()
                     }
+                } else if id.id == HotkeyID.shiftTab.rawValue {
+                    // Cmd+Shift+Tab - activate switcher in reverse or select
+                    // previous. Marks the Shift hold so its release isn't also
+                    // treated as a bare Shift tap (which would double-step).
+                    manager.isActive = true
+                    manager.tabSeenDuringShift = true
+                    DispatchQueue.main.async {
+                        manager.delegate?.hotkeyTriggeredReverse()
+                    }
                 } else if id.id == HotkeyID.hideOthers.rawValue {
                     // Cmd+Opt+H - hide others. Its own path so it isn't misrouted to
                     // keyPressed(H), which hides only the selected app.
@@ -267,9 +304,14 @@ class HotkeyManager {
         let userDataPtr = Unmanaged.passUnretained(self).toOpaque()
         InstallEventHandler(eventTarget, handler, eventTypes.count, &eventTypes, userDataPtr, &hotKeyPressedHandler)
 
-        // Only register Cmd+Tab at startup - other hotkeys registered when panel is active
+        // Only register Cmd+Tab / Cmd+Shift+Tab at startup - other hotkeys
+        // registered when panel is active. Carbon hotkeys need an exact modifier
+        // match, so the Shift variant must be its own registration — without it,
+        // Cmd+Shift+Tab (whose native handler we disable) would do nothing.
         let id = EventHotKeyID(signature: HotkeyManager.signature, id: HotkeyID.tab.rawValue)
         RegisterEventHotKey(UInt32(kVK_Tab), UInt32(cmdKey), id, eventTarget, UInt32(kEventHotKeyNoOptions), &tabHotKeyRef)
+        let shiftId = EventHotKeyID(signature: HotkeyManager.signature, id: HotkeyID.shiftTab.rawValue)
+        RegisterEventHotKey(UInt32(kVK_Tab), UInt32(cmdKey | shiftKey), shiftId, eventTarget, UInt32(kEventHotKeyNoOptions), &shiftTabHotKeyRef)
     }
 
     // MARK: - Event Tap (for modifier release and mouse clicks only)
@@ -306,9 +348,15 @@ class HotkeyManager {
 
                 if cmdIsDown {
                     if shiftIsDown && !manager.shiftWasDown {
-                        // Shift was just pressed while Cmd is held
+                        // Fresh Shift hold while Cmd is held. Don't act yet —
+                        // the release decides between a bare tap (select
+                        // previous) and Shift+Tab (the shiftTab hotkey, which
+                        // marks tabSeenDuringShift so we stay silent here).
+                        manager.tabSeenDuringShift = false
+                    } else if !shiftIsDown && manager.shiftWasDown && !manager.tabSeenDuringShift {
+                        // Bare Shift tap: pressed and released with no Tab.
                         DispatchQueue.main.async {
-                            manager.delegate?.shiftPressed()
+                            manager.delegate?.shiftTapped()
                         }
                     }
                     manager.shiftWasDown = shiftIsDown
@@ -325,9 +373,8 @@ class HotkeyManager {
                 }
             } else if type == .leftMouseDown || type == .rightMouseDown {
                 if manager.isActive {
-                    let location = event.location
                     DispatchQueue.main.async {
-                        manager.delegate?.mouseClicked(at: location)
+                        manager.delegate?.mouseClicked()
                     }
                     // NOTE: the tap is .listenOnly (so revoking Accessibility can
                     // never freeze input), which means we CANNOT consume the click.
@@ -373,10 +420,18 @@ class HotkeyManager {
         // panel). When that work ran long, macOS disabled the tap by timeout and the
         // Cmd-up event was lost — leaving the switcher panel stuck open. A dedicated
         // thread keeps the callback responsive regardless of what the UI is doing.
+        stateQueue.sync { _tapStopRequested = false }
         let thread = Thread { [weak self] in
+            guard let self = self else { return }
             let runLoopSource = CFMachPortCreateRunLoopSource(nil, eventTap, 0)
             CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-            self?.eventTapRunLoop = CFRunLoopGetCurrent()
+            // Store the run loop and check for an early stop() in one critical
+            // section, so a stop can never fall between the two.
+            let shouldRun: Bool = self.stateQueue.sync {
+                self._eventTapRunLoop = CFRunLoopGetCurrent()
+                return !self._tapStopRequested
+            }
+            guard shouldRun else { return }
             CGEvent.tapEnable(tap: eventTap, enable: true)
             print("Event tap created successfully")
             CFRunLoopRun()

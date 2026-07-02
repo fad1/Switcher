@@ -26,17 +26,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     private var activityToken: NSObjectProtocol?
     private var isHandlingRevocation = false
 
-    // Key codes
-    private let kVK_Tab: UInt16 = 0x30
-    private let kVK_Escape: UInt16 = 0x35
-    private let kVK_Return: UInt16 = 0x24
-    private let kVK_LeftArrow: UInt16 = 0x7B
-    private let kVK_RightArrow: UInt16 = 0x7C
-    private let kVK_UpArrow: UInt16 = 0x7E
-    private let kVK_DownArrow: UInt16 = 0x7D
-    private let kVK_H: UInt16 = 0x04
-    private let kVK_Q: UInt16 = 0x0C
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Start tracking app activation order
         AppListProvider.startObserving()
@@ -67,9 +56,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         prefsWindowController = PreferencesWindowController()
         prefsWindowController.onToggleMenuBar = { [weak self] _ in self?.refreshStatusItem() }
 
-        // Start silently; only surface the window when it's time to nag.
-        maybeShowDonationNag()
-
         // Only take over Cmd+Tab once Accessibility permission is confirmed. Until
         // then, native Cmd+Tab is left working — so a first launch without
         // permission can never leave the system broken.
@@ -83,6 +69,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         // process is the only reliable way to release the event tap and clear
         // the macOS input-freeze bug.
         startPermissionMonitor()
+
+        // Nag AFTER switching is live, and deferred: runModal() blocks this
+        // method, and anything sequenced behind it, until the user answers.
+        DispatchQueue.main.async { [weak self] in
+            self?.maybeShowDonationNag()
+        }
 
         print("SimpleSwitcher started. Press Cmd+Tab to activate.")
     }
@@ -113,8 +105,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
             panel.selectNext()
             return
         }
+        openPanel(reverse: false)
+    }
 
-        // Get visible apps
+    func hotkeyTriggeredReverse() {
+        // Cmd+Shift+Tab: same as hotkeyTriggered but cycling backward.
+        guard state == .idle else {
+            panel.selectPrevious()
+            return
+        }
+        openPanel(reverse: true)
+    }
+
+    /// Snapshot the visible apps and show the panel. Forward opens on the
+    /// second app (quick Alt-Tab back-and-forth); reverse opens on the last
+    /// (least recently used), matching the native switcher's wrap-around.
+    private func openPanel(reverse: Bool) {
         currentApps = AppListProvider.getVisibleApps()
 
         guard !currentApps.isEmpty else {
@@ -124,8 +130,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
             return
         }
 
-        // Show panel with apps, select second app (index 1) if available
-        let selectIndex = currentApps.count > 1 ? 1 : 0
+        let selectIndex = reverse
+            ? currentApps.count - 1
+            : (currentApps.count > 1 ? 1 : 0)
         panel.showWithApps(currentApps, selectIndex: selectIndex)
 
         state = .active
@@ -148,12 +155,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         dismissPanel()
     }
 
-    func shiftPressed() {
+    func shiftTapped() {
         guard state == .active else { return }
         panel.selectPrevious()
     }
 
-    func mouseClicked(at point: CGPoint) {
+    func mouseClicked() {
         guard state == .active else { return }
 
         // Use NSEvent.mouseLocation for consistent coordinate system with panel.frame
@@ -184,7 +191,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     func keyPressed(_ keyCode: UInt16) {
         guard state == .active else { return }
 
-        switch keyCode {
+        switch Int(keyCode) {
         case kVK_Tab:
             panel.selectNext()
 
@@ -209,10 +216,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         case kVK_DownArrow:
             panel.selectDown()
 
-        case kVK_H:
+        case kVK_ANSI_H:
             hideSelectedApp()
 
-        case kVK_Q:
+        case kVK_ANSI_Q:
             quitSelectedApp()
 
         default:
