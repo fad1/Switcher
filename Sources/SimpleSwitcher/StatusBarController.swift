@@ -8,6 +8,9 @@ class StatusBarController: NSObject, NSMenuDelegate {
     /// Invoked when the user picks "Preferences…" from the menu.
     var onOpenPreferences: (() -> Void)?
 
+    /// Invoked when the user picks "Hide Other Apps" from the menu.
+    var onHideOtherApps: (() -> Void)?
+
     private var statusItem: NSStatusItem?
     private var grayscaleItem: NSMenuItem?
 
@@ -50,6 +53,15 @@ class StatusBarController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        // Declutter: hide all apps except the frontmost so the switcher shows fewer
+        // icons. No key equivalent — a status-menu accelerator only fires while the
+        // menu is open; the real shortcut is ⌥⌘H inside the switcher panel.
+        let hideOthers = NSMenuItem(title: "Hide Other Apps", action: #selector(hideOtherApps), keyEquivalent: "")
+        hideOthers.target = self
+        menu.addItem(hideOthers)
+
+        menu.addItem(.separator())
+
         let donate = NSMenuItem(title: "Donate", action: #selector(donate), keyEquivalent: "")
         donate.target = self
         menu.addItem(donate)
@@ -80,6 +92,10 @@ class StatusBarController: NSObject, NSMenuDelegate {
     @objc private func toggleGrayscale() {
         // Takes effect on the next Cmd+Tab, since the panel rebuilds its icons.
         Preferences.grayscaleIcons.toggle()
+    }
+
+    @objc private func hideOtherApps() {
+        onHideOtherApps?()
     }
 
     @objc private func donate() {

@@ -14,6 +14,12 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     private var selectedColumn: Int = 0
     private var visualEffectView: NSVisualEffectView!
 
+    // Subtle "hide others to declutter" reminder shown at the bottom of the panel
+    // only when the switcher has grown cluttered (2+ rows) and the pref is enabled.
+    // Reused across opens; kept out of the `rows` array so navigation/hit-testing
+    // never treat it as an app. See updateHint.
+    private var hintLabel: NSTextField?
+
     // Dead zone for hover - like AltTab's CursorEvents
     private var deadZoneInitialPosition: NSPoint?
     private var isAllowedToMouseHover = false
@@ -21,6 +27,9 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
 
     // Recomputed per show based on the target screen (see iconSize(for:)).
     private var itemSize: CGFloat = 76
+    // Max items per row, computed from screen width in showWithApps and reused by
+    // appendApps so live-added apps pack into rows the same way.
+    private var itemsPerRow: Int = 1
     private let itemSpacing: CGFloat = 0
     private let rowSpacing: CGFloat = 4
     private let panelPadding: CGFloat = 10
@@ -134,7 +143,7 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         // Calculate max items per row based on screen width
         let maxPanelWidth = screenFrame.width * screenMarginPercent
         let availableWidth = maxPanelWidth - panelPadding * 2
-        let itemsPerRow = max(1, Int(floor((availableWidth + itemSpacing) / (itemSize + itemSpacing))))
+        itemsPerRow = max(1, Int(floor((availableWidth + itemSpacing) / (itemSize + itemSpacing))))
 
         // Create app views and organize into rows
         var currentRow: [AppItemView] = []
@@ -162,17 +171,17 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
             verticalStackView.addArrangedSubview(currentRowStackView)
         }
 
-        // Calculate panel size
-        let rowCount = rows.count
-        let maxRowCount = rows.map { $0.count }.max() ?? 1
-        let panelWidth = CGFloat(maxRowCount) * itemSize + CGFloat(maxRowCount - 1) * itemSpacing + panelPadding * 2
-        let panelHeight = CGFloat(rowCount) * itemSize + CGFloat(rowCount - 1) * rowSpacing + panelPadding * 2
+        // Show the "start fresh" hint when the switcher has grown cluttered (2+ rows).
+        let showingHint = updateHint()
+
+        // Calculate panel size (including the hint row if shown)
+        let size = panelSize(showingHint: showingHint)
 
         // Center panel on target screen
-        let panelX = screenFrame.midX - panelWidth / 2
-        let panelY = screenFrame.midY - panelHeight / 2
+        let panelX = screenFrame.midX - size.width / 2
+        let panelY = screenFrame.midY - size.height / 2
 
-        setFrame(NSRect(x: panelX, y: panelY, width: panelWidth, height: panelHeight), display: true)
+        setFrame(NSRect(x: panelX, y: panelY, width: size.width, height: size.height), display: true)
 
         // Select initial app (convert flat index to row/column)
         let adjustedIndex = min(selectIndex, apps.count - 1)
@@ -430,20 +439,18 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
             }
         }
 
-        // Update panel size
+        // Update panel size (hint may drop off if we fell below 2 rows)
         if !rows.isEmpty {
-            let rowCount = rows.count
-            let maxRowCount = rows.map { $0.count }.max() ?? 1
-            let panelWidth = CGFloat(maxRowCount) * itemSize + CGFloat(maxRowCount - 1) * itemSpacing + panelPadding * 2
-            let panelHeight = CGFloat(rowCount) * itemSize + CGFloat(rowCount - 1) * rowSpacing + panelPadding * 2
+            let showingHint = updateHint()
+            let size = panelSize(showingHint: showingHint)
 
             var frame = self.frame
             let centerX = frame.midX
             let centerY = frame.midY
-            frame.size.width = panelWidth
-            frame.size.height = panelHeight
-            frame.origin.x = centerX - panelWidth / 2
-            frame.origin.y = centerY - panelHeight / 2
+            frame.size.width = size.width
+            frame.size.height = size.height
+            frame.origin.x = centerX - size.width / 2
+            frame.origin.y = centerY - size.height / 2
             setFrame(frame, display: true)
 
             updateSelection()
@@ -457,11 +464,110 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         return removedApp
     }
 
+    /// Append newly-appeared apps to the end of the grid WITHOUT disturbing the
+    /// existing items or the current selection (unlike showWithApps, which fully
+    /// rebuilds, recenters on screen, resets the dead zone, and re-orders front).
+    /// Driven by AppDelegate's live-refresh timer while the panel is open.
+    func appendApps(_ apps: [AppInfo]) {
+        guard !apps.isEmpty, !rows.isEmpty else { return }
+
+        // The resize below can trigger a spurious mouseEntered; suppress hover briefly.
+        let wasAllowed = isAllowedToMouseHover
+        isAllowedToMouseHover = false
+
+        // Detach the hint (it's the last arranged subview) so new rows append before
+        // it; updateHint() re-adds it last afterward.
+        if let existing = hintLabel, existing.superview != nil {
+            verticalStackView.removeArrangedSubview(existing)
+            existing.removeFromSuperview()
+        }
+
+        // The current last row's horizontal stack view (its items share it as superview).
+        var currentRowStackView = rows.last?.first?.superview as? NSStackView
+
+        for app in apps {
+            // Start a new row if the current one is full or missing.
+            if currentRowStackView == nil || (rows.last?.count ?? itemsPerRow) >= itemsPerRow {
+                let rowStack = createRowStackView()
+                verticalStackView.addArrangedSubview(rowStack)
+                rows.append([])
+                currentRowStackView = rowStack
+            }
+            let itemView = AppItemView(appInfo: app, itemSize: itemSize)
+            itemView.delegate = self
+            appViews.append(itemView)
+            currentRowStackView?.addArrangedSubview(itemView)
+            rows[rows.count - 1].append(itemView)
+        }
+
+        // Re-add the hint if warranted, then resize keeping the panel centered
+        // (do NOT recenter on screen — the panel is already placed).
+        let showingHint = updateHint()
+        let size = panelSize(showingHint: showingHint)
+        var frame = self.frame
+        let centerX = frame.midX
+        let centerY = frame.midY
+        frame.size.width = size.width
+        frame.size.height = size.height
+        frame.origin.x = centerX - size.width / 2
+        frame.origin.y = centerY - size.height / 2
+        setFrame(frame, display: true)
+
+        // Selection indices are unchanged (append-only), just repaint highlight.
+        updateSelection()
+
+        // Restore hover after the resize settles.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.isAllowedToMouseHover = wasAllowed
+        }
+    }
+
     var hasApps: Bool {
         !rows.isEmpty
     }
 
     // MARK: - Private Methods
+
+    /// Panel size from the current `rows`, adding a row for the hint when shown.
+    /// Single source of truth so `showWithApps` and `removeSelectedApp` stay consistent.
+    private func panelSize(showingHint: Bool) -> CGSize {
+        let rowCount = rows.count
+        let maxRowCount = rows.map { $0.count }.max() ?? 1
+        var width = CGFloat(maxRowCount) * itemSize + CGFloat(maxRowCount - 1) * itemSpacing + panelPadding * 2
+        var height = CGFloat(rowCount) * itemSize + CGFloat(rowCount - 1) * rowSpacing + panelPadding * 2
+        if showingHint, let label = hintLabel {
+            let hintSize = label.fittingSize
+            height += rowSpacing + hintSize.height        // stack spacing + label
+            width = max(width, hintSize.width + panelPadding * 2)  // don't clip a wide hint
+        }
+        return CGSize(width: width, height: height)
+    }
+
+    /// Attach the hint as the last arranged subview when cluttered (2+ rows), else
+    /// detach it. Appended last so it never shifts a row's index in the stack (which
+    /// `removeSelectedApp` relies on). Returns whether the hint is now showing.
+    @discardableResult
+    private func updateHint() -> Bool {
+        // Always detach first: avoids a double-add and keeps hide/rebuild clean.
+        if let existing = hintLabel, existing.superview != nil {
+            verticalStackView.removeArrangedSubview(existing)
+            existing.removeFromSuperview()
+        }
+        guard Preferences.showDeclutterTip, rows.count >= 2 else { return false }
+        let label = hintLabel ?? makeHintLabel()
+        hintLabel = label
+        verticalStackView.addArrangedSubview(label)
+        return true
+    }
+
+    private func makeHintLabel() -> NSTextField {
+        let label = NSTextField(labelWithString: "⌥⌘H · Hide others — fewer icons here")
+        label.font = NSFont.systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }
 
     private func updateSelection() {
         for (rowIndex, row) in rows.enumerated() {

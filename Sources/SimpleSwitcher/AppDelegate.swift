@@ -20,6 +20,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     // Background monitor that reconciles Accessibility permission state.
     private let permissionQueue = DispatchQueue(label: "com.simpleswitcher.permission")
     private var permissionTimer: DispatchSourceTimer?
+    // Polls for newly-opened apps while the panel is shown, so their icons appear as
+    // soon as their windows render (see startAppListRefresh).
+    private var appListRefreshTimer: DispatchSourceTimer?
     private var activityToken: NSObjectProtocol?
     private var isHandlingRevocation = false
 
@@ -57,6 +60,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         // escape hatch even while we're waiting for Accessibility permission.
         statusBarController = StatusBarController()
         statusBarController.onOpenPreferences = { [weak self] in self?.showPreferences() }
+        statusBarController.onHideOtherApps = { [weak self] in self?.hideOtherApps() }
         refreshStatusItem()
 
         // Preferences window (reusable single instance, hidden until requested)
@@ -127,6 +131,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         state = .active
         // Register active-only hotkeys (H, Q, arrows, etc.)
         hotkeyManager.registerActiveHotkeys()
+        // Mirror apps opened while the panel is up (they're missing from the initial
+        // snapshot until their windows render).
+        startAppListRefresh()
         // isActive already set by HotkeyManager
     }
 
@@ -205,6 +212,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         }
     }
 
+    /// Cmd+Opt+H while the panel is open: hide every app except the frontmost one
+    /// (native "Hide Others"), then dismiss — leaving just the app you were in.
+    /// Distinct from Cmd+H, which hides only the selected app.
+    func hideOthersRequested() {
+        guard state == .active else { return }
+        hideOtherApps()
+        dismissPanel()
+    }
+
     // MARK: - AppSwitcherPanelDelegate
 
     func panelDidSelectApp(_ app: AppInfo) {
@@ -233,6 +249,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         }
     }
 
+    /// Hide every regular app EXCEPT the frontmost one — macOS's "Hide Others",
+    /// a lighter alternative to quitting apps to declutter the switcher. Hidden apps
+    /// drop out of the switcher (AppListProvider filters `!app.isHidden`), so the
+    /// next Cmd+Tab shows fewer icons. Uses the same NSRunningApplication.hide()
+    /// primitive as hideSelectedApp, looped over all other regular apps. The panel
+    /// is non-activating and we're `.accessory`, so `frontmostApplication` is the
+    /// real app the user was in — from both the menu bar and the in-panel shortcut.
+    private func hideOtherApps() {
+        let selfPID = ProcessInfo.processInfo.processIdentifier
+        let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
+            let pid = app.processIdentifier
+            if pid == selfPID || pid == frontPID { continue }  // keep ourselves + the front app
+            app.hide()
+        }
+    }
+
     private func quitSelectedApp() {
         guard let appToQuit = panel.removeSelectedApp() else { return }
 
@@ -249,11 +282,40 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     }
 
     private func dismissPanel() {
+        stopAppListRefresh()
         panel.hidePanel()
         state = .idle
         hotkeyManager.isActive = false
         // Unregister active-only hotkeys so Cmd+H/Q work in other apps
         hotkeyManager.unregisterActiveHotkeys()
+    }
+
+    /// While the panel is open, poll for apps that have become visible since it
+    /// opened (e.g. ones the user just launched from the Dock/Finder, whose windows
+    /// hadn't rendered when the initial snapshot was taken) and append them to the
+    /// end — append-only, so it never fights the user's own hide/quit actions and
+    /// never reorders or moves the icons already on screen. Runs on the main queue
+    /// because building each app's icon (NSImage) must happen on main.
+    private func startAppListRefresh() {
+        guard appListRefreshTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 0.3, repeating: 0.3, leeway: .milliseconds(100))
+        timer.setEventHandler { [weak self] in
+            guard let self = self, self.state == .active else { return }
+            let fresh = AppListProvider.getVisibleApps()
+            let known = Set(self.currentApps.map { $0.pid })
+            let additions = fresh.filter { !known.contains($0.pid) }
+            guard !additions.isEmpty else { return }  // no change → no reflow
+            self.currentApps.append(contentsOf: additions)
+            self.panel.appendApps(additions)
+        }
+        appListRefreshTimer = timer
+        timer.resume()
+    }
+
+    private func stopAppListRefresh() {
+        appListRefreshTimer?.cancel()
+        appListRefreshTimer = nil
     }
 
     // MARK: - Switching & Accessibility Permission

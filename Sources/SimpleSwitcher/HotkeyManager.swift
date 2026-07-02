@@ -6,6 +6,7 @@ protocol HotkeyManagerDelegate: AnyObject {
     func modifierKeyReleased()
     func keyPressed(_ keyCode: UInt16)
     func shiftPressed()
+    func hideOthersRequested()
     func mouseClicked(at point: CGPoint)
 }
 
@@ -59,6 +60,7 @@ class HotkeyManager {
         case returnKey = 7  // Cmd+Return - activate
         case upArrow = 8    // Cmd+Up - previous row
         case downArrow = 9  // Cmd+Down - next row
+        case hideOthers = 10 // Cmd+Opt+H - hide all apps except the frontmost
     }
 
     // Map hotkey IDs to key codes for delegate
@@ -140,6 +142,16 @@ class HotkeyManager {
             RegisterEventHotKey(UInt32(keyCode), UInt32(cmdKey), id, eventTarget, UInt32(kEventHotKeyNoOptions), &ref)
             activeHotKeyRefs.append(ref)
         }
+
+        // Cmd+Opt+H — hide all apps except the frontmost (macOS "Hide Others"), to
+        // declutter the switcher. Registered separately because it needs the option
+        // modifier, and distinct from Cmd+H (hide selected). Only registered while the
+        // panel is open, so native Hide-Others works normally elsewhere. Unlike Shift,
+        // Option isn't watched by the tap, so there's no select-previous side effect.
+        var hideOthersRef: EventHotKeyRef?
+        let hideOthersId = EventHotKeyID(signature: HotkeyManager.signature, id: HotkeyID.hideOthers.rawValue)
+        RegisterEventHotKey(UInt32(kVK_ANSI_H), UInt32(cmdKey | optionKey), hideOthersId, eventTarget, UInt32(kEventHotKeyNoOptions), &hideOthersRef)
+        activeHotKeyRefs.append(hideOthersRef)
 
         // Swallow every other ordinary Cmd+<key> combo so it doesn't leak to the
         // app behind the panel. These ids are absent from `hotkeyToKeyCode`, so the
@@ -233,6 +245,12 @@ class HotkeyManager {
                     manager.isActive = true
                     DispatchQueue.main.async {
                         manager.delegate?.hotkeyTriggered()
+                    }
+                } else if id.id == HotkeyID.hideOthers.rawValue {
+                    // Cmd+Opt+H - hide others. Its own path so it isn't misrouted to
+                    // keyPressed(H), which hides only the selected app.
+                    DispatchQueue.main.async {
+                        manager.delegate?.hideOthersRequested()
                     }
                 } else {
                     // Other hotkeys (H, Q, arrows, etc.) - only registered when active

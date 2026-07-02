@@ -11,6 +11,7 @@ enum Preferences {
         // existing `defaults write com.simpleswitcher.app grayscaleIcons` workflow.
         static let grayscaleIcons = "grayscaleIcons"
         static let showMenuBarIcon = "showMenuBarIcon"
+        static let showDeclutterTip = "showDeclutterTip"
         static let launchCount = "launchCount"
         static let hasDonated = "hasDonated"
     }
@@ -20,7 +21,10 @@ enum Preferences {
     /// Registers in-process fallbacks. Does NOT persist, so this must run before
     /// any read, on every launch (see AppDelegate.applicationDidFinishLaunching).
     static func registerDefaults() {
-        defaults.register(defaults: [Key.showMenuBarIcon: true])
+        defaults.register(defaults: [
+            Key.showMenuBarIcon: true,
+            Key.showDeclutterTip: true,
+        ])
     }
 
     // MARK: - Accessors
@@ -33,6 +37,13 @@ enum Preferences {
     static var showMenuBarIcon: Bool {
         get { defaults.bool(forKey: Key.showMenuBarIcon) }
         set { defaults.set(newValue, forKey: Key.showMenuBarIcon) }
+    }
+
+    /// Whether to show the "⌥⌘H · Hide others" declutter tip at the bottom of the
+    /// switcher when it's cluttered (2+ rows). Defaults to true (see registerDefaults).
+    static var showDeclutterTip: Bool {
+        get { defaults.bool(forKey: Key.showDeclutterTip) }
+        set { defaults.set(newValue, forKey: Key.showDeclutterTip) }
     }
 
     static var launchCount: Int {

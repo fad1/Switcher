@@ -11,10 +11,11 @@ class PreferencesWindowController: NSWindowController {
     private var launchAtLoginCheckbox: NSButton!
     private var menuBarCheckbox: NSButton!
     private var grayscaleCheckbox: NSButton!
+    private var declutterTipCheckbox: NSButton!
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 200),
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 235),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -49,6 +50,11 @@ class PreferencesWindowController: NSWindowController {
             target: self,
             action: #selector(toggleGrayscale)
         )
+        declutterTipCheckbox = NSButton(
+            checkboxWithTitle: "Show declutter tip in switcher",
+            target: self,
+            action: #selector(toggleDeclutterTip)
+        )
 
         let donateButton = NSButton(title: "❤️ Donate", target: self, action: #selector(donate))
         donateButton.bezelStyle = .rounded
@@ -64,6 +70,7 @@ class PreferencesWindowController: NSWindowController {
             launchAtLoginCheckbox,
             menuBarCheckbox,
             grayscaleCheckbox,
+            declutterTipCheckbox,
             donateButton,
             quitButton,
             versionLabel
@@ -96,6 +103,7 @@ class PreferencesWindowController: NSWindowController {
         launchAtLoginCheckbox.state = LoginItem.isEnabled ? .on : .off
         menuBarCheckbox.state = Preferences.showMenuBarIcon ? .on : .off
         grayscaleCheckbox.state = Preferences.grayscaleIcons ? .on : .off
+        declutterTipCheckbox.state = Preferences.showDeclutterTip ? .on : .off
     }
 
     private func versionString() -> String {
@@ -120,6 +128,11 @@ class PreferencesWindowController: NSWindowController {
     @objc private func toggleGrayscale() {
         // Takes effect on the next Cmd+Tab, since the panel rebuilds its icons.
         Preferences.grayscaleIcons = grayscaleCheckbox.state == .on
+    }
+
+    @objc private func toggleDeclutterTip() {
+        // Takes effect on the next Cmd+Tab — the panel re-reads the pref in updateHint().
+        Preferences.showDeclutterTip = declutterTipCheckbox.state == .on
     }
 
     @objc private func donate() {
