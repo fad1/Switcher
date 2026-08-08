@@ -10,9 +10,9 @@ Switcher intercepts the native Cmd+Tab hotkey and displays a custom switcher pan
 
 It also includes apps with a Dock badge (e.g. Mail with an unread count) even if they have no open window.
 
-**Apps with only minimized windows are NOT filtered out** (verified empirically 2026-07): a minimized window is off-screen in CGWindowList terms, but so is a window on another Space, and the off-screen branch must accept those — CGWindowList alone cannot tell the two apart. True minimized filtering would need per-window AX checks (`AXMinimized`), like AltTab. See Known Limitations.
+**Apps with only minimized windows are NOT filtered out.** The evidence, and why no rule over CGWindowList alone can fix it, lives in `Sources/SwitcherKernels/WindowFilterSpecs.md`. See also Known Limitations.
 
-**Total codebase: ~2500 lines across 12 Swift files**
+**Total codebase: ~2470 lines of app across 12 Swift files, plus ~260 lines of pure kernels and ~580 lines of tests**
 
 ## Architecture
 
@@ -30,7 +30,37 @@ Sources/SimpleSwitcher/
 ├── StatusBarController.swift     # Optional menu bar icon (NSStatusItem) + menu
 ├── PreferencesWindowController.swift # Programmatic Preferences window
 └── PrivateAPIs.swift    # CGSSetSymbolicHotKeyEnabled binding
+
+Sources/SwitcherKernels/    # pure logic, no AppKit / no IPC / no state
+├── WindowFilter.swift       # which CGWindowList entries count as switchable
+├── WindowFilterSpecs.md     # its evidence, incl. the minimized-window finding
+├── ShiftTapResolver.swift   # Shift-tap vs Shift+Tab state machine
+└── GridNavigation.swift     # row/column selection movement
+
+Tests/SwitcherKernelsTests/  # executable test runner (see Kernels & tests)
 ```
+
+### Kernels & tests
+
+Logic that can be made pure lives in the **`SwitcherKernels`** library target, following
+AltTab's triad convention: implementation + `*Specs.md` (evidence) + tests, with the spec's
+"Test scenarios" section mirroring the test functions 1:1. The app target depends on it and
+the call sites delegate; the kernels never touch AppKit, IPC or mutable global state.
+
+Three kernels today: `WindowFilter` (the CGWindowList accept/reject predicate, and the only
+one with a spec), `ShiftTapResolver`, `GridNavigation`.
+
+```bash
+swift run --disable-sandbox SwitcherKernelsTests
+```
+
+**Not `swift test`, deliberately.** This machine has only the Command Line Tools, which ship
+no XCTest and no runner for swift-testing bundles — `swift test` there builds an `.xctest`
+bundle it cannot execute and **exits 0 without running anything**, i.e. a green that means
+nothing. So the tests are an ordinary executable with a small assertion harness
+(`Tests/SwitcherKernelsTests/TestHarness.swift`); it prints each failure with its test name
+and line and exits non-zero. If Xcode is ever installed, converting to XCTest or
+swift-testing is mechanical — one `Check` call per assertion.
 
 ### Component Responsibilities
 
@@ -53,7 +83,7 @@ Sources/SimpleSwitcher/
 
 **HotkeyManager.swift**
 - Registers Cmd+Tab AND Cmd+Shift+Tab globally (via `registerHotkeys()`, called by AppDelegate once permission is confirmed). Carbon hotkeys need an exact modifier match, so the Shift variant is its own registration — without it Cmd+Shift+Tab (whose native handler we disable) would do nothing. From idle it opens the panel selecting the LAST app (reverse/wrap-around); while open, Shift+Tab steps backward.
-- **Shift-tap vs Shift+Tab disambiguation**: the legacy "tap Shift to go back" gesture fires on Shift *release*, and only if no Cmd+Shift+Tab fired during the hold (`tabSeenDuringShift`). Firing on press would double-step every Shift+Tab.
+- **Shift-tap vs Shift+Tab disambiguation**: the legacy "tap Shift to go back" gesture fires on Shift *release*, and only if no Cmd+Shift+Tab fired during the hold. Firing on press would double-step every Shift+Tab. The state machine is `ShiftTapResolver` in SwitcherKernels; HotkeyManager feeds it flag transitions inside a single `stateQueue` critical section, since the tap thread and the main-thread Carbon handler both touch it
 - `tryCreateEventTap() -> Bool`: creates the CGEvent tap; returns false when Accessibility permission is missing (the gate AppDelegate checks before touching native Cmd+Tab). Idempotent.
 - **`.listenOnly` (passive) CGEvent tap**: the window server never waits on it, so revoking Accessibility while it's alive cannot freeze input (an active `.defaultTap` can — forums thread 735204). Trade-off: a passive tap can't consume events — outside clicks are instead swallowed by AppSwitcherPanel's invisible per-screen click-shield windows (see below), which turn click-away into a plain dismiss.
 - On `tapDisabledByUserInput`/`tapDisabledByTimeout` (benign throttling) it just re-enables the tap
@@ -71,7 +101,7 @@ Sources/SimpleSwitcher/
 - Maintains MRU (Most Recently Used) order via NSWorkspace notifications
 - `getVisibleApps()`: Returns apps with visible windows OR a Dock badge, sorted by MRU
 - Uses CGWindowListCopyWindowInfo to find visible windows
-- Filters: 0 <= layer <= 20, bounds >= 50x50; off-screen windows accepted if they have an owner name (covers other Spaces — and, unavoidably, minimized windows; see Project Overview)
+- The accept/reject rule itself is `WindowFilter` in SwitcherKernels: 0 <= layer <= 20, bounds >= 50x50, off-screen windows accepted if they have an owner name (covers other Spaces — and, unavoidably, minimized windows). `getVisibleWindowPIDs()` only runs the query and collects PIDs. Evidence and the missing-key defaults: `WindowFilterSpecs.md`
 - **Dock badge scan is cached (~2s TTL)**: `getDockBadges()` walks the Dock's AX tree (several IPC round-trips per dock item, on the main thread), and `getVisibleApps()` runs on every Cmd+Tab press plus every 300ms while the panel is open — `getDockBadgesCached()` keeps that off the hot path
 
 **AppSwitcherPanel.swift**
@@ -80,7 +110,7 @@ Sources/SimpleSwitcher/
 - Centers on screen containing mouse cursor (multi-monitor support)
 - **Multi-row layout**: Uses max 85% of screen width; wraps to additional rows when many apps are open
 - **Per-screen icon scaling**: `iconSize(for:)` scales the 76pt base by the target screen's height / 1080, floored at 76 and capped at 160, so large monitors get larger icons and laptops never shrink
-- Manages selection state with row/column tracking for grid navigation
+- Manages selection state with row/column tracking; the movement rules (wrapping, column clamping into a short last row, the flat-index-to-cell conversion on open, and the reflow after H/Q) are `GridNavigation` in SwitcherKernels
 - **Dead zone hover**: Ignores mouse position when panel appears; hover only enabled after 3px mouse movement (prevents accidental selection)
 - **Hover has two event sources**: a global mouseMoved monitor AND an `.activeAlways` tracking area on the panel content (`HoverTrackingVisualEffectView`). The tracking area is required because global monitors never see the app's own events — when Switcher itself is active (e.g. Cmd+Tab right after using Preferences) the monitor is silent and hover would otherwise be dead
 - **Click shields**: while the panel is open, invisible non-activating panels cover every screen one window level below it, swallowing clicks outside the panel (the `.listenOnly` tap can't consume them) and requesting a dismiss — click-away behaves like Escape and never reaches the app behind
@@ -173,6 +203,7 @@ Sources/SimpleSwitcher/
 ```bash
 cd /Users/fahd/Claude/_Constantinapple/SimpleSwitcher
 swift build --disable-sandbox
+swift run --disable-sandbox SwitcherKernelsTests   # kernel tests; see Kernels & tests
 .build/debug/SimpleSwitcher
 ```
 
@@ -234,7 +265,7 @@ Every other ordinary Cmd+&lt;key&gt; combo is registered as a no-op while the pa
 2. **No per-window switching** - Shows apps, not individual windows
 3. **Ad-hoc signed only** - Not notarized, may trigger Gatekeeper warning on first run
 4. **Private API usage** - CGSSetSymbolicHotKeyEnabled may break in future macOS
-5. **Minimized-only apps still appear** - CGWindowList can't distinguish a minimized window from one on another Space (both off-screen); filtering them would need per-window AX `AXMinimized` checks
+5. **Minimized-only apps still appear** - CGWindowList can't distinguish a minimized window from one on another Space (both off-screen). Pinned by `testMinimizedWindowIsIndistinguishableFromOtherSpaceWindow`; the two candidate fixes (per-window AX `AXMinimized`, or the WindowServer's own minimized tag bit) are weighed in `WindowFilterSpecs.md`
 
 ## Threading Notes
 

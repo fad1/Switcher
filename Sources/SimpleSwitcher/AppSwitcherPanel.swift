@@ -1,4 +1,5 @@
 import Cocoa
+import SwitcherKernels
 
 protocol AppSwitcherPanelDelegate: AnyObject {
     func panelDidSelectApp(_ app: AppInfo)
@@ -203,17 +204,11 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         setFrame(NSRect(x: panelX, y: panelY, width: size.width, height: size.height), display: true)
 
         // Select initial app (convert flat index to row/column)
-        let adjustedIndex = min(selectIndex, apps.count - 1)
-        if adjustedIndex >= 0 {
-            selectedRow = adjustedIndex / itemsPerRow
-            selectedColumn = adjustedIndex % itemsPerRow
-            // Clamp to valid range for last row
-            if selectedRow >= rows.count {
-                selectedRow = rows.count - 1
-                selectedColumn = rows[selectedRow].count - 1
-            } else if selectedColumn >= rows[selectedRow].count {
-                selectedColumn = rows[selectedRow].count - 1
-            }
+        if let position = GridNavigation.initialPosition(flatIndex: selectIndex,
+                                                         itemCount: apps.count,
+                                                         itemsPerRow: itemsPerRow,
+                                                         rowLengths: rowLengths) {
+            selectedPosition = position
             updateSelection()
         }
 
@@ -383,64 +378,39 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         }
     }
 
-    /// Next/previous walk the grid in reading order and wrap at both ends.
-    /// Up/down move by row only, clamping the column because the last row is
-    /// usually shorter, and are no-ops in a single-row panel.
+    /// Row lengths are all `GridNavigation` needs to move the selection; the
+    /// views stay here.
+    private var rowLengths: [Int] { rows.map { $0.count } }
+
+    private var selectedPosition: GridPosition {
+        get { GridPosition(row: selectedRow, column: selectedColumn) }
+        set {
+            selectedRow = newValue.row
+            selectedColumn = newValue.column
+        }
+    }
+
     func selectNext() {
         guard !rows.isEmpty else { return }
-
-        if selectedColumn < rows[selectedRow].count - 1 {
-            selectedColumn += 1
-        } else {
-            if selectedRow < rows.count - 1 {
-                selectedRow += 1
-                selectedColumn = 0
-            } else {
-                selectedRow = 0
-                selectedColumn = 0
-            }
-        }
+        selectedPosition = GridNavigation.next(from: selectedPosition, rowLengths: rowLengths)
         updateSelection()
     }
 
     func selectPrevious() {
         guard !rows.isEmpty else { return }
-
-        if selectedColumn > 0 {
-            selectedColumn -= 1
-        } else {
-            if selectedRow > 0 {
-                selectedRow -= 1
-                selectedColumn = rows[selectedRow].count - 1
-            } else {
-                selectedRow = rows.count - 1
-                selectedColumn = rows[selectedRow].count - 1
-            }
-        }
+        selectedPosition = GridNavigation.previous(from: selectedPosition, rowLengths: rowLengths)
         updateSelection()
     }
 
     func selectUp() {
         guard rows.count > 1 else { return }
-
-        if selectedRow > 0 {
-            selectedRow -= 1
-        } else {
-            selectedRow = rows.count - 1
-        }
-        selectedColumn = min(selectedColumn, rows[selectedRow].count - 1)
+        selectedPosition = GridNavigation.up(from: selectedPosition, rowLengths: rowLengths)
         updateSelection()
     }
 
     func selectDown() {
         guard rows.count > 1 else { return }
-
-        if selectedRow < rows.count - 1 {
-            selectedRow += 1
-        } else {
-            selectedRow = 0
-        }
-        selectedColumn = min(selectedColumn, rows[selectedRow].count - 1)
+        selectedPosition = GridNavigation.down(from: selectedPosition, rowLengths: rowLengths)
         updateSelection()
     }
 
@@ -478,19 +448,10 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
             rows.remove(at: selectedRow)
         }
 
-        // -1/-1 marks "no selection"; getSelectedApp and removeSelectedApp both
-        // range-check, so an empty panel returns nil rather than trapping.
-        if rows.isEmpty {
-            selectedRow = -1
-            selectedColumn = -1
-        } else {
-            if selectedRow >= rows.count {
-                selectedRow = rows.count - 1
-            }
-            if selectedColumn >= rows[selectedRow].count {
-                selectedColumn = rows[selectedRow].count - 1
-            }
-        }
+        // An emptied grid selects GridPosition.noSelection (-1/-1); getSelectedApp and
+        // removeSelectedApp both range-check, so that returns nil rather than
+        // trapping.
+        selectedPosition = GridNavigation.clampAfterRemoval(selectedPosition, rowLengths: rowLengths)
 
         // Update panel size (hint may drop off if we fell below 2 rows)
         if !rows.isEmpty {

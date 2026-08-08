@@ -1,4 +1,5 @@
 import Cocoa
+import SwitcherKernels
 
 struct AppInfo {
     let app: NSRunningApplication
@@ -90,6 +91,10 @@ class AppListProvider {
     /// PIDs of apps owning at least one window that counts as switchable —
     /// including fullscreen windows and windows on other Spaces, which
     /// CGWindowList reports as off-screen.
+    ///
+    /// The accept/reject rule itself lives in `WindowFilter`; this only does the
+    /// query and the collection. See `WindowFilterSpecs.md`, in particular for why
+    /// the off-screen branch cannot exclude minimized windows.
     private static func getVisibleWindowPIDs() -> Set<pid_t> {
         guard let windowList = CGWindowListCopyWindowInfo([.excludeDesktopElements, .optionAll], kCGNullWindowID) as? [[String: Any]] else {
             return []
@@ -97,41 +102,9 @@ class AppListProvider {
 
         var pids = Set<pid_t>()
         for window in windowList {
-            // Layer semantics: 0 is an ordinary window; negatives sit below the
-            // desktop; a few apps use small positives (3 = screensaver/fullscreen
-            // video); anything above ~20 is system UI (menu bar, Dock).
-            let layer = window[kCGWindowLayer as String] as? Int ?? 0
-            if layer < 0 || layer > 20 {
-                continue
-            }
-
-            // Too small to be a real window: menus, tooltips, shadow helpers.
-            if let bounds = window[kCGWindowBounds as String] as? [String: CGFloat] {
-                let width = bounds["Width"] ?? 0
-                let height = bounds["Height"] ?? 0
-                if width < 50 || height < 50 {
-                    continue
-                }
-            } else {
-                continue
-            }
-
-            // A window on another Space reports isOnScreen = false, so off-screen
-            // windows must be accepted too; a non-empty owner name is what keeps
-            // system-process windows out. CGWindowList cannot tell those apart from
-            // MINIMIZED windows (also off-screen), which is why an app whose only
-            // window is minimized still appears in the switcher.
-            let isOnScreen = window[kCGWindowIsOnscreen as String] as? Bool ?? false
-            if !isOnScreen {
-                guard let ownerName = window[kCGWindowOwnerName as String] as? String,
-                      !ownerName.isEmpty else {
-                    continue
-                }
-            }
-
-            if let pid = window[kCGWindowOwnerPID as String] as? pid_t {
-                pids.insert(pid)
-            }
+            let raw = RawWindow(cgWindowInfo: window)
+            guard WindowFilter.accepts(raw), let pid = raw.ownerPID else { continue }
+            pids.insert(pid)
         }
 
         return pids

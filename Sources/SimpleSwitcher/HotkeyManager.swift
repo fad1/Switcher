@@ -1,5 +1,6 @@
 import Cocoa
 import Carbon
+import SwitcherKernels
 
 protocol HotkeyManagerDelegate: AnyObject {
     func hotkeyTriggered()
@@ -48,8 +49,11 @@ class HotkeyManager {
 
     // State protected by stateQueue
     private var _isActive = false
-    private var _shiftWasDown = false
-    private var _tabSeenDuringShift = false
+    // Shift-tap vs Shift+Tab, decided in SwitcherKernels. Touched from both the
+    // tap thread (flagsChanged) and the main thread (the Carbon handler), so
+    // every transition runs as one critical section rather than as separate
+    // reads and writes.
+    private var _shiftTap = ShiftTapResolver()
 
     /// Set this synchronously in an event handler BEFORE any async delegate call:
     /// release-build optimizations otherwise let the tap thread observe the old
@@ -59,16 +63,12 @@ class HotkeyManager {
         set { stateQueue.sync { _isActive = newValue } }
     }
 
-    private var shiftWasDown: Bool {
-        get { stateQueue.sync { _shiftWasDown } }
-        set { stateQueue.sync { _shiftWasDown = newValue } }
+    private func noteShiftTabHotkey() {
+        stateQueue.sync { _shiftTap.shiftTabHotkeyFired() }
     }
 
-    // Whether Cmd+Shift+Tab fired during the current Shift hold. Distinguishes
-    // a bare Shift tap (select previous) from Shift held as part of Shift+Tab.
-    private var tabSeenDuringShift: Bool {
-        get { stateQueue.sync { _tabSeenDuringShift } }
-        set { stateQueue.sync { _tabSeenDuringShift = newValue } }
+    private func resolveShiftTap(cmdDown: Bool, shiftDown: Bool) -> ShiftTapResolver.Action {
+        stateQueue.sync { _shiftTap.flagsChanged(cmdDown: cmdDown, shiftDown: shiftDown) }
     }
 
     // Hotkey IDs — sequential, NOT key codes; hotkeyToKeyCode maps them back to
@@ -278,7 +278,7 @@ class HotkeyManager {
                     // Marks the Shift hold so its release isn't also treated as a
                     // bare Shift tap, which would double-step.
                     manager.isActive = true
-                    manager.tabSeenDuringShift = true
+                    manager.noteShiftTabHotkey()
                     DispatchQueue.main.async {
                         manager.delegate?.hotkeyTriggeredReverse()
                     }
@@ -343,24 +343,13 @@ class HotkeyManager {
                 let shiftIsDown = flags.contains(.maskShift)
                 let cmdIsDown = flags.contains(.maskCommand)
 
-                if cmdIsDown {
-                    if shiftIsDown && !manager.shiftWasDown {
-                        // Fresh Shift hold while Cmd is held. Don't act yet —
-                        // the release decides between a bare tap (select
-                        // previous) and Shift+Tab (the shiftTab hotkey, which
-                        // marks tabSeenDuringShift so we stay silent here).
-                        manager.tabSeenDuringShift = false
-                    } else if !shiftIsDown && manager.shiftWasDown && !manager.tabSeenDuringShift {
-                        // Bare Shift tap: pressed and released with no Tab.
-                        DispatchQueue.main.async {
-                            manager.delegate?.shiftTapped()
-                        }
+                if manager.resolveShiftTap(cmdDown: cmdIsDown, shiftDown: shiftIsDown) == .selectPrevious {
+                    DispatchQueue.main.async {
+                        manager.delegate?.shiftTapped()
                     }
-                    manager.shiftWasDown = shiftIsDown
                 }
 
                 if !cmdIsDown {
-                    manager.shiftWasDown = false
                     manager.isActive = false
                     DispatchQueue.main.async {
                         manager.delegate?.modifierKeyReleased()
