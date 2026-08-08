@@ -8,7 +8,12 @@ import ApplicationServices
 enum AccessibilityPermission {
 
     /// Whether this process currently has Accessibility permission. Cheap and
-    /// thread-safe; safe to call from the event-tap callback.
+    /// thread-safe; safe to call from a background timer.
+    ///
+    /// Caches per process: after permission is REVOKED, macOS keeps reporting a
+    /// running app as trusted until it relaunches. Grant detection (the path that
+    /// matters) works; revoke detection largely does not, so nothing may depend
+    /// on it firing.
     static var isGranted: Bool { AXIsProcessTrusted() }
 
     /// Triggers the standard macOS Accessibility prompt and registers the app in

@@ -21,7 +21,6 @@ class AppItemView: NSView {
         self.itemSize = itemSize
         self.iconSize = itemSize
 
-        // Create icon view
         iconImageView = NSImageView()
         iconImageView.image = Preferences.grayscaleIcons
             ? AppItemView.desaturated(appInfo.icon, pointSize: itemSize)
@@ -43,7 +42,6 @@ class AppItemView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 8
 
-        // Add icon
         iconImageView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconImageView)
 
@@ -150,7 +148,6 @@ class AppItemView: NSView {
     }
 
     private func formatBadge(_ badge: String) -> String {
-        // If it's a number greater than 99, show "99+"
         if let num = Int(badge), num > 99 {
             return "99+"
         }
@@ -188,6 +185,7 @@ class AppItemView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
-        // Selection will be handled by delegate
+        // Deliberately empty: selection persists once the pointer leaves an icon,
+        // so moving through the gaps between icons doesn't clear the highlight.
     }
 }

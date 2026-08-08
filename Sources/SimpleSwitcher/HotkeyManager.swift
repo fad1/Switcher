@@ -30,7 +30,7 @@ class HotkeyManager {
     private var eventTap: CFMachPort?
 
     // Dedicated thread + run loop that services the event tap, so its callback is
-    // never starved by main-thread UI work (see setupEventTap for rationale).
+    // never starved by main-thread UI work (see tryCreateEventTap for rationale).
     private var eventTapThread: Thread?
     // Written by the tap thread, read by stop() — access only under stateQueue.
     // The flag covers the startup race: if stop() runs before the thread has
@@ -39,7 +39,6 @@ class HotkeyManager {
     private var _eventTapRunLoop: CFRunLoop?
     private var _tapStopRequested = false
 
-    // Serial queue for thread-safe state access
     private let stateQueue = DispatchQueue(label: "com.simpleswitcher.state")
 
     // Backstop watchdog (see startCmdWatchdog) — polls live modifier state while
@@ -52,6 +51,9 @@ class HotkeyManager {
     private var _shiftWasDown = false
     private var _tabSeenDuringShift = false
 
+    /// Set this synchronously in an event handler BEFORE any async delegate call:
+    /// release-build optimizations otherwise let the tap thread observe the old
+    /// value and drop the matching Cmd-up.
     var isActive: Bool {
         get { stateQueue.sync { _isActive } }
         set { stateQueue.sync { _isActive = newValue } }
@@ -69,7 +71,9 @@ class HotkeyManager {
         set { stateQueue.sync { _tabSeenDuringShift = newValue } }
     }
 
-    // Hotkey IDs - using actual key codes for easy mapping
+    // Hotkey IDs — sequential, NOT key codes; hotkeyToKeyCode maps them back to
+    // key codes for the delegate. The comments name the modifier each one is
+    // registered with, which the raw values don't show.
     private enum HotkeyID: UInt32 {
         case tab = 1        // Cmd+Tab - activate/next
         case h = 2          // Cmd+H - hide
@@ -115,7 +119,6 @@ class HotkeyManager {
     ]
 
     func stop() {
-        // Unregister tab hotkeys
         if let ref = tabHotKeyRef {
             UnregisterEventHotKey(ref)
             tabHotKeyRef = nil
@@ -125,7 +128,6 @@ class HotkeyManager {
             shiftTabHotKeyRef = nil
         }
 
-        // Unregister active hotkeys
         unregisterActiveHotkeys()
 
         if let handler = hotKeyPressedHandler {
@@ -181,10 +183,9 @@ class HotkeyManager {
         RegisterEventHotKey(UInt32(kVK_ANSI_H), UInt32(cmdKey | optionKey), hideOthersId, eventTarget, UInt32(kEventHotKeyNoOptions), &hideOthersRef)
         activeHotKeyRefs.append(hideOthersRef)
 
-        // Swallow every other ordinary Cmd+<key> combo so it doesn't leak to the
-        // app behind the panel. These ids are absent from `hotkeyToKeyCode`, so the
-        // Carbon handler no-ops them — registration alone consumes the keystroke.
-        // The 0x1000 offset keeps the ids clear of the action ids (1–9).
+        // These ids are absent from `hotkeyToKeyCode`, so the Carbon handler no-ops
+        // them — registration alone consumes the keystroke. The 0x1000 offset keeps
+        // them clear of the action ids (1–11).
         for keyCode in HotkeyManager.swallowKeyCodes {
             var ref: EventHotKeyRef?
             let id = EventHotKeyID(signature: HotkeyManager.signature, id: UInt32(0x1000 + keyCode))
@@ -269,15 +270,13 @@ class HotkeyManager {
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
 
                 if id.id == HotkeyID.tab.rawValue {
-                    // Cmd+Tab - activate switcher or select next
                     manager.isActive = true
                     DispatchQueue.main.async {
                         manager.delegate?.hotkeyTriggered()
                     }
                 } else if id.id == HotkeyID.shiftTab.rawValue {
-                    // Cmd+Shift+Tab - activate switcher in reverse or select
-                    // previous. Marks the Shift hold so its release isn't also
-                    // treated as a bare Shift tap (which would double-step).
+                    // Marks the Shift hold so its release isn't also treated as a
+                    // bare Shift tap, which would double-step.
                     manager.isActive = true
                     manager.tabSeenDuringShift = true
                     DispatchQueue.main.async {
@@ -315,7 +314,6 @@ class HotkeyManager {
     }
 
     // MARK: - Event Tap (for modifier release and mouse clicks only)
-    // Note: keyDown removed - using Carbon hotkeys instead (only requires Accessibility permission)
 
     /// Creates the CGEvent tap. Returns true on success (or if already created).
     /// Returns false when `CGEvent.tapCreate` fails — which happens when
@@ -326,8 +324,8 @@ class HotkeyManager {
         // Idempotent: never create a second tap / run-loop source.
         if eventTap != nil { return true }
 
-        // Only listen for flagsChanged and mouse clicks
-        // keyDown events require Input Monitoring permission, so we use Carbon hotkeys instead
+        // No keyDown: that would require Input Monitoring permission on top of
+        // Accessibility, so keys come from Carbon hotkeys instead.
         let eventMask = (1 << CGEventType.flagsChanged.rawValue) |
                         (1 << CGEventType.leftMouseDown.rawValue) |
                         (1 << CGEventType.rightMouseDown.rawValue)
@@ -342,7 +340,6 @@ class HotkeyManager {
             if type == .flagsChanged {
                 let flags = event.flags
 
-                // Detect shift key tap (press then release while Cmd is held)
                 let shiftIsDown = flags.contains(.maskShift)
                 let cmdIsDown = flags.contains(.maskCommand)
 
@@ -362,10 +359,8 @@ class HotkeyManager {
                     manager.shiftWasDown = shiftIsDown
                 }
 
-                // Check if Command key was released
                 if !cmdIsDown {
                     manager.shiftWasDown = false
-                    // Set inactive immediately
                     manager.isActive = false
                     DispatchQueue.main.async {
                         manager.delegate?.modifierKeyReleased()
@@ -415,11 +410,9 @@ class HotkeyManager {
         }
 
         // Service the tap on a dedicated, high-priority thread with its own run loop.
-        // Previously the source was added to the main run loop, so the Cmd-release
-        // callback competed with main-thread UI work (loading icons, building the
-        // panel). When that work ran long, macOS disabled the tap by timeout and the
-        // Cmd-up event was lost — leaving the switcher panel stuck open. A dedicated
-        // thread keeps the callback responsive regardless of what the UI is doing.
+        // On the main run loop the callback competes with UI work (loading icons,
+        // building the panel); when that work runs long, macOS disables the tap by
+        // timeout and the in-flight Cmd-up is lost, leaving the panel stuck open.
         stateQueue.sync { _tapStopRequested = false }
         let thread = Thread { [weak self] in
             guard let self = self else { return }

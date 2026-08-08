@@ -239,7 +239,6 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     private func startMouseMonitor() {
         stopMouseMonitor()
 
-        // Single global monitor for mouse movement
         mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
             self?.handleMouseMoved()
         }
@@ -248,7 +247,6 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     private func handleMouseMoved() {
         let currentPos = NSEvent.mouseLocation
 
-        // Dead zone logic (like AltTab's CursorEvents)
         if !isAllowedToMouseHover {
             if deadZoneInitialPosition == nil {
                 deadZoneInitialPosition = currentPos
@@ -264,7 +262,6 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
             }
         }
 
-        // Hover enabled - update selection if mouse is over panel
         if frame.contains(currentPos) {
             selectAppUnderMouse()
             updateHintHover()
@@ -279,7 +276,6 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
 
         for (rowIndex, row) in rows.enumerated() {
             for (colIndex, view) in row.enumerated() {
-                // Convert view bounds to window coordinates
                 let viewFrame = view.convert(view.bounds, to: nil)
                 if viewFrame.contains(windowPoint) {
                     if selectedRow != rowIndex || selectedColumn != colIndex {
@@ -319,7 +315,6 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     func getAppAtPoint(_ windowPoint: NSPoint) -> AppInfo? {
         for row in rows {
             for view in row {
-                // Convert view bounds to window coordinates
                 let viewFrame = view.convert(view.bounds, to: nil)
                 if viewFrame.contains(windowPoint) {
                     return view.appInfo
@@ -388,19 +383,19 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         }
     }
 
+    /// Next/previous walk the grid in reading order and wrap at both ends.
+    /// Up/down move by row only, clamping the column because the last row is
+    /// usually shorter, and are no-ops in a single-row panel.
     func selectNext() {
         guard !rows.isEmpty else { return }
 
-        // Move right in current row
         if selectedColumn < rows[selectedRow].count - 1 {
             selectedColumn += 1
         } else {
-            // Move to next row, first column
             if selectedRow < rows.count - 1 {
                 selectedRow += 1
                 selectedColumn = 0
             } else {
-                // Wrap to first row, first column
                 selectedRow = 0
                 selectedColumn = 0
             }
@@ -411,16 +406,13 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     func selectPrevious() {
         guard !rows.isEmpty else { return }
 
-        // Move left in current row
         if selectedColumn > 0 {
             selectedColumn -= 1
         } else {
-            // Move to previous row, last column
             if selectedRow > 0 {
                 selectedRow -= 1
                 selectedColumn = rows[selectedRow].count - 1
             } else {
-                // Wrap to last row, last column
                 selectedRow = rows.count - 1
                 selectedColumn = rows[selectedRow].count - 1
             }
@@ -434,10 +426,8 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         if selectedRow > 0 {
             selectedRow -= 1
         } else {
-            // Wrap to last row
             selectedRow = rows.count - 1
         }
-        // Clamp column to row length
         selectedColumn = min(selectedColumn, rows[selectedRow].count - 1)
         updateSelection()
     }
@@ -448,10 +438,8 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         if selectedRow < rows.count - 1 {
             selectedRow += 1
         } else {
-            // Wrap to first row
             selectedRow = 0
         }
-        // Clamp column to row length
         selectedColumn = min(selectedColumn, rows[selectedRow].count - 1)
         updateSelection()
     }
@@ -469,24 +457,19 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
         let removedView = rows[selectedRow][selectedColumn]
         let removedApp = removedView.appInfo
 
-        // Temporarily disable hover during removal (panel resize can trigger mouseEntered)
         suppressHoverDuringResize()
 
-        // Remove from flat list
         if let flatIndex = appViews.firstIndex(where: { $0 === removedView }) {
             appViews.remove(at: flatIndex)
         }
 
-        // Remove from current row's stack view
         if let rowStackView = removedView.superview as? NSStackView {
             rowStackView.removeArrangedSubview(removedView)
             removedView.removeFromSuperview()
         }
 
-        // Remove from rows array
         rows[selectedRow].remove(at: selectedColumn)
 
-        // Remove empty rows
         if rows[selectedRow].isEmpty {
             if let rowStackView = verticalStackView.arrangedSubviews[safe: selectedRow] {
                 verticalStackView.removeArrangedSubview(rowStackView)
@@ -495,16 +478,15 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
             rows.remove(at: selectedRow)
         }
 
-        // Adjust selection
+        // -1/-1 marks "no selection"; getSelectedApp and removeSelectedApp both
+        // range-check, so an empty panel returns nil rather than trapping.
         if rows.isEmpty {
             selectedRow = -1
             selectedColumn = -1
         } else {
-            // Clamp row
             if selectedRow >= rows.count {
                 selectedRow = rows.count - 1
             }
-            // Clamp column
             if selectedColumn >= rows[selectedRow].count {
                 selectedColumn = rows[selectedRow].count - 1
             }
@@ -526,7 +508,6 @@ class AppSwitcherPanel: NSPanel, AppItemViewDelegate {
     func appendApps(_ apps: [AppInfo]) {
         guard !apps.isEmpty, !rows.isEmpty else { return }
 
-        // The resize below can trigger a spurious mouseEntered; suppress hover briefly.
         suppressHoverDuringResize()
 
         // Detach the hint (it's the last arranged subview) so new rows append before

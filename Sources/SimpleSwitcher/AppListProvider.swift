@@ -23,7 +23,6 @@ class AppListProvider {
             updateMRU(frontApp.processIdentifier)
         }
 
-        // Observe app activation
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
@@ -34,7 +33,6 @@ class AppListProvider {
             }
         }
 
-        // Observe app termination to clean up MRU
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didTerminateApplicationNotification,
             object: nil,
@@ -48,46 +46,30 @@ class AppListProvider {
 
     /// Update MRU order when an app is activated
     private static func updateMRU(_ pid: pid_t) {
-        // Remove if already in list
         mruOrder.removeAll { $0 == pid }
-        // Add to front
         mruOrder.insert(pid, at: 0)
-        // Keep list reasonable size
         if mruOrder.count > 50 {
             mruOrder.removeLast()
         }
     }
 
-    /// Returns apps that should be shown in the switcher
-    /// Shows apps that are:
-    /// - Regular apps (activationPolicy == .regular)
-    /// - Not hidden
-    /// - Have visible windows OR have a dock badge (notification)
+    /// The switcher's app list, MRU-ordered. A badge alone qualifies an app, so
+    /// e.g. Mail with an unread count is listed even with no window at all.
     static func getVisibleApps() -> [AppInfo] {
-        // Get PIDs of apps that have at least one on-screen window
         let visiblePIDs = getVisibleWindowPIDs()
-
-        // Get dock badges for all running apps
         let badges = getDockBadgesCached()
-
-        // Get current app's PID to exclude self
         let selfPID = ProcessInfo.processInfo.processIdentifier
 
-        // Filter running applications
         let apps = NSWorkspace.shared.runningApplications.compactMap { app -> AppInfo? in
-            // Only include regular apps (not background/accessory apps)
+            // .regular excludes background and accessory apps (which includes us).
             guard app.activationPolicy == .regular else { return nil }
 
-            // Exclude hidden apps
             guard !app.isHidden else { return nil }
 
-            // Exclude self
             guard app.processIdentifier != selfPID else { return nil }
 
-            // Get badge for this app (if any)
             let badge = badges[app.bundleIdentifier ?? ""]
 
-            // Include apps that have visible windows OR have a badge
             let hasVisibleWindow = visiblePIDs.contains(app.processIdentifier)
             let hasBadge = badge != nil
 
@@ -102,12 +84,12 @@ class AppListProvider {
             return AppInfo(app: app, name: name, icon: icon, pid: app.processIdentifier, badge: badge)
         }
 
-        // Sort by MRU order
         return sortByMRU(apps)
     }
 
-    /// Gets PIDs of all apps with on-screen windows across all spaces
-    /// Includes fullscreen windows and windows on other spaces
+    /// PIDs of apps owning at least one window that counts as switchable —
+    /// including fullscreen windows and windows on other Spaces, which
+    /// CGWindowList reports as off-screen.
     private static func getVisibleWindowPIDs() -> Set<pid_t> {
         guard let windowList = CGWindowListCopyWindowInfo([.excludeDesktopElements, .optionAll], kCGNullWindowID) as? [[String: Any]] else {
             return []
@@ -115,24 +97,18 @@ class AppListProvider {
 
         var pids = Set<pid_t>()
         for window in windowList {
-            // Get window layer - layer 0 is normal windows
-            // Negative layers are below desktop, high positive layers are system UI
+            // Layer semantics: 0 is an ordinary window; negatives sit below the
+            // desktop; a few apps use small positives (3 = screensaver/fullscreen
+            // video); anything above ~20 is system UI (menu bar, Dock).
             let layer = window[kCGWindowLayer as String] as? Int ?? 0
-
-            // Accept normal windows (layer 0) and some special cases
-            // Layer 0: normal windows
-            // Layer < 0: below desktop (skip)
-            // Layer 3: screensaver/fullscreen video (some apps)
-            // Layer > 20: system UI elements like menubar, dock (skip)
             if layer < 0 || layer > 20 {
                 continue
             }
 
-            // Check bounds - skip windows with no size (menus, tooltips, etc.)
+            // Too small to be a real window: menus, tooltips, shadow helpers.
             if let bounds = window[kCGWindowBounds as String] as? [String: CGFloat] {
                 let width = bounds["Width"] ?? 0
                 let height = bounds["Height"] ?? 0
-                // Minimum size to be considered a real window
                 if width < 50 || height < 50 {
                     continue
                 }
@@ -140,14 +116,13 @@ class AppListProvider {
                 continue
             }
 
-            // Check if window is on screen OR if it has valid bounds (for other spaces)
-            // Windows on other spaces have isOnScreen = false but still valid
+            // A window on another Space reports isOnScreen = false, so off-screen
+            // windows must be accepted too; a non-empty owner name is what keeps
+            // system-process windows out. CGWindowList cannot tell those apart from
+            // MINIMIZED windows (also off-screen), which is why an app whose only
+            // window is minimized still appears in the switcher.
             let isOnScreen = window[kCGWindowIsOnscreen as String] as? Bool ?? false
-
-            // For windows not on current screen, check if they're just on another space
-            // by verifying they have a valid owner name (real app, not system process)
             if !isOnScreen {
-                // Skip if no owner name (likely system window)
                 guard let ownerName = window[kCGWindowOwnerName as String] as? String,
                       !ownerName.isEmpty else {
                     continue
@@ -191,7 +166,6 @@ class AppListProvider {
 
         let dockElement = AXUIElementCreateApplication(dockApp.processIdentifier)
 
-        // Get Dock's children
         var childrenValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(dockElement, kAXChildrenAttribute as CFString, &childrenValue) == .success,
               let children = childrenValue as? [AXUIElement] else {
@@ -207,16 +181,13 @@ class AppListProvider {
                 continue
             }
 
-            // Get list children (dock items)
             var listChildrenValue: CFTypeRef?
             guard AXUIElementCopyAttributeValue(child, kAXChildrenAttribute as CFString, &listChildrenValue) == .success,
                   let listChildren = listChildrenValue as? [AXUIElement] else {
                 continue
             }
 
-            // Check each dock item
             for dockItem in listChildren {
-                // Get subrole - must be application dock item
                 var subroleValue: CFTypeRef?
                 guard AXUIElementCopyAttributeValue(dockItem, kAXSubroleAttribute as CFString, &subroleValue) == .success,
                       let subrole = subroleValue as? String,
@@ -224,7 +195,6 @@ class AppListProvider {
                     continue
                 }
 
-                // Check if app is running
                 var isRunningValue: CFTypeRef?
                 guard AXUIElementCopyAttributeValue(dockItem, "AXIsApplicationRunning" as CFString, &isRunningValue) == .success,
                       let isRunning = isRunningValue as? Bool,
@@ -232,7 +202,6 @@ class AppListProvider {
                     continue
                 }
 
-                // Get the badge label (AXStatusLabel)
                 var statusLabelValue: CFTypeRef?
                 guard AXUIElementCopyAttributeValue(dockItem, "AXStatusLabel" as CFString, &statusLabelValue) == .success,
                       let statusLabel = statusLabelValue as? String,
@@ -247,7 +216,6 @@ class AppListProvider {
                     continue
                 }
 
-                // Get bundle identifier from the app URL
                 if let bundle = Bundle(url: url),
                    let bundleId = bundle.bundleIdentifier {
                     badges[bundleId] = statusLabel

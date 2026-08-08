@@ -27,7 +27,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     private var isHandlingRevocation = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Start tracking app activation order
         AppListProvider.startObserving()
 
         // Setup hotkey manager (does NOT take over Cmd+Tab yet — see enableSwitching)
@@ -64,10 +63,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         } else {
             AccessibilityPermission.prompt()
         }
-        // Continuously reconcile permission: enable switching when granted, and
-        // (critically) QUIT if it is revoked while running — terminating the
-        // process is the only reliable way to release the event tap and clear
-        // the macOS input-freeze bug.
+        // Reconcile continuously, so a grant takes effect without a relaunch.
         startPermissionMonitor()
 
         // Nag AFTER switching is live, and deferred: runModal() blocks this
@@ -91,7 +87,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Restore native Cmd+Tab
         setNativeCommandTabEnabled(true)
         hotkeyManager?.stop()
     }
@@ -141,13 +136,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         // Mirror apps opened while the panel is up (they're missing from the initial
         // snapshot until their windows render).
         startAppListRefresh()
-        // isActive already set by HotkeyManager
     }
 
     func modifierKeyReleased() {
         guard state == .active else { return }
 
-        // Switch to selected app
         if let selectedApp = panel.getSelectedApp() {
             activateApp(selectedApp)
         }
@@ -260,13 +253,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     private func hideSelectedApp() {
         guard let appToHide = panel.removeSelectedApp() else { return }
 
-        // Hide the app
         appToHide.app.hide()
-
-        // Remove from our list
         currentApps.removeAll { $0.pid == appToHide.pid }
 
-        // If no more apps, dismiss
         if !panel.hasApps {
             dismissPanel()
         }
@@ -292,13 +281,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     private func quitSelectedApp() {
         guard let appToQuit = panel.removeSelectedApp() else { return }
 
-        // Terminate the app
         appToQuit.app.terminate()
-
-        // Remove from our list
         currentApps.removeAll { $0.pid == appToQuit.pid }
 
-        // If no more apps, dismiss
         if !panel.hasApps {
             dismissPanel()
         }
@@ -385,10 +370,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         }
     }
 
-    /// Accessibility was revoked while we held the event tap. Restore native
-    /// Cmd+Tab and QUIT. Terminating the process is the only reliable way to tear
-    /// the tap out of the window server and clear the macOS input-freeze bug —
-    /// disabling the tap in-process while staying alive is NOT enough.
+    /// Best-effort cleanup when Accessibility is revoked while we hold the tap:
+    /// restore native Cmd+Tab, then quit. Rarely reached in practice, because
+    /// `AXIsProcessTrusted()` caches per process (see AccessibilityPermission).
+    /// Not load-bearing either way — the tap is `.listenOnly`, so a live tap
+    /// cannot freeze input; freeze safety lives in the tap type, not here.
     private func handleRevocation() {
         guard !isHandlingRevocation else { return }
         isHandlingRevocation = true

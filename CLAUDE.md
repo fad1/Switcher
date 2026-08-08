@@ -12,7 +12,7 @@ It also includes apps with a Dock badge (e.g. Mail with an unread count) even if
 
 **Apps with only minimized windows are NOT filtered out** (verified empirically 2026-07): a minimized window is off-screen in CGWindowList terms, but so is a window on another Space, and the off-screen branch must accept those — CGWindowList alone cannot tell the two apart. True minimized filtering would need per-window AX checks (`AXMinimized`), like AltTab. See Known Limitations.
 
-**Total codebase: ~1900 lines across 12 Swift files**
+**Total codebase: ~2500 lines across 12 Swift files**
 
 ## Architecture
 
@@ -23,7 +23,7 @@ Sources/SimpleSwitcher/
 ├── HotkeyManager.swift  # Carbon hotkey registration, CGEvent tap for modifiers
 ├── AppListProvider.swift# Queries visible apps, maintains MRU order
 ├── AppSwitcherPanel.swift# NSPanel subclass with visual effect blur
-├── AppItemView.swift    # Individual app item (icon + name)
+├── AppItemView.swift    # Individual app item (icon + badge, no name label)
 ├── Preferences.swift    # UserDefaults wrapper (settings keys + donate helper)
 ├── AccessibilityPermission.swift # AXIsProcessTrusted check + system prompt
 ├── LoginItem.swift      # "Start at login" via SMAppService (macOS 13+)
@@ -48,8 +48,8 @@ Sources/SimpleSwitcher/
   - `enableSwitching()`: creates the tap FIRST, and only then disables native Cmd+Tab + registers the Cmd+Tab hotkey (order matters)
   - On launch without Accessibility permission: leaves native Cmd+Tab working and fires the system prompt
   - `startPermissionMonitor()`: a background ~1s poll of `AXIsProcessTrusted()` (App Nap disabled via `beginActivity`) reconciles state — `enableSwitching()` when granted; on revoke `handleRevocation()` restores native Cmd+Tab and quits
-  - **Freeze prevention is in the tap type, not the recovery**: the tap is **`.listenOnly`** (see HotkeyManager), so revoking permission can't freeze input regardless of detection. The original attempt to *recover* from an active-tap freeze (quit-on-revoke) was unreliable and is now just a best-effort cleanup.
-  - **`AXIsProcessTrusted()` caches per process**: macOS keeps reporting a running app as trusted even after permission is revoked, until relaunch. So the revoke branch usually does NOT fire — the app keeps working until relaunched. This is harmless now that the tap is passive. Grant detection (the path that matters) works fine.
+  - **Freeze prevention is in the tap type, not the recovery**: the tap is **`.listenOnly`** (see HotkeyManager), so revoking permission can't freeze input regardless of detection. Quit-on-revoke is best-effort cleanup — nothing may depend on it firing.
+  - **`AXIsProcessTrusted()` caches per process**: macOS keeps reporting a running app as trusted even after permission is revoked, until relaunch. So the revoke branch usually does NOT fire — the app keeps working until relaunched, which is harmless with a passive tap. Grant detection (the path that matters) works fine.
 
 **HotkeyManager.swift**
 - Registers Cmd+Tab AND Cmd+Shift+Tab globally (via `registerHotkeys()`, called by AppDelegate once permission is confirmed). Carbon hotkeys need an exact modifier match, so the Shift variant is its own registration — without it Cmd+Shift+Tab (whose native handler we disable) would do nothing. From idle it opens the panel selecting the LAST app (reverse/wrap-around); while open, Shift+Tab steps backward.
@@ -62,8 +62,8 @@ Sources/SimpleSwitcher/
   - `registerActiveHotkeys()` called when panel opens
   - `unregisterActiveHotkeys()` called when panel closes
   - This ensures Cmd+H/Q work normally in other apps when panel is not showing
+- **Cmd+&lt;key&gt; swallowing**: while the panel is open, `swallowKeyCodes` registers every other ordinary Cmd combo (Cmd+W, Cmd+S, digits, punctuation…) as a no-op Carbon hotkey, so it can't leak to the app behind the panel. Their ids are `0x1000 + keyCode`, absent from `hotkeyToKeyCode`, so the handler ignores them — registration alone consumes the keystroke
 - Tap monitors (read-only): flagsChanged (Cmd release / Shift) and mouseDown (notify delegate of clicks while active)
-- **Note**: Uses Carbon hotkeys instead of CGEvent keyDown to avoid requiring Input Monitoring permission (only Accessibility needed)
 - **Thread safety**: Uses `DispatchQueue` for synchronized access to `isActive` state
 - **Critical**: Sets `isActive` synchronously in event handlers before async delegate calls to avoid race conditions in release builds
 
@@ -79,6 +79,7 @@ Sources/SimpleSwitcher/
 - NSVisualEffectView with `.hudWindow` material (blur effect)
 - Centers on screen containing mouse cursor (multi-monitor support)
 - **Multi-row layout**: Uses max 85% of screen width; wraps to additional rows when many apps are open
+- **Per-screen icon scaling**: `iconSize(for:)` scales the 76pt base by the target screen's height / 1080, floored at 76 and capped at 160, so large monitors get larger icons and laptops never shrink
 - Manages selection state with row/column tracking for grid navigation
 - **Dead zone hover**: Ignores mouse position when panel appears; hover only enabled after 3px mouse movement (prevents accidental selection)
 - **Hover has two event sources**: a global mouseMoved monitor AND an `.activeAlways` tracking area on the panel content (`HoverTrackingVisualEffectView`). The tracking area is required because global monitors never see the app's own events — when Switcher itself is active (e.g. Cmd+Tab right after using Preferences) the monitor is silent and hover would otherwise be dead
@@ -86,23 +87,27 @@ Sources/SimpleSwitcher/
 - Uses `mouseLocationOutsideOfEventStream` for accurate mouse position in non-activating panel
 
 **AppItemView.swift**
-- Displays app icon (76x76, no label)
+- Displays app icon at the panel's current item size (76pt base, scaled per screen; no label)
 - Selection highlight (white 30% alpha background)
+- Optional Dock-badge bubble (red, or a neutral sRGB gray when `grayscaleIcons`); counts over 99 render as "99+"
+- **Grayscale is baked into the icon bitmap**, not applied as a layer filter — a CI filter on the item's layer makes CoreAnimation re-rasterize icon+badge whenever the selection highlight changes, which shows up as icons wobbling on hover. The gray is computed in an explicit sRGB colorspace so it doesn't come out bluish on wide-gamut Retina panels
 
 **Preferences.swift**
 - `enum Preferences`: single source of truth for persisted settings over `UserDefaults.standard`
-- Keys: `grayscaleIcons`, `showMenuBarIcon` (defaults to true), `launchCount`, `hasDonated`
+- Keys: `grayscaleIcons`, `showMenuBarIcon` (defaults to true), `showDeclutterTip` (defaults to true), `launchCount`, `hasDonated`
 - `registerDefaults()` must run before any read on every launch (`register(defaults:)` does not persist)
 - `openDonatePage()`: the one choke point for donating — sets `hasDonated = true`, then opens the Ko-fi URL
 
 **StatusBarController.swift**
 - Owns the optional menu bar icon (`NSStatusItem`), held by a strong reference (system does not retain it)
 - `show()` / `hide()` toggle the icon live (driven by `showMenuBarIcon`)
-- Menu: Preferences… / Donate / Quit; `onOpenPreferences` closure opens the window
+- Menu: Preferences… / Grayscale Icons / Hide Other Apps / Donate / Quit Switcher. The `onOpenPreferences` and `onHideOtherApps` closures call back into AppDelegate
+- "Hide Other Apps" carries no key equivalent on purpose: a status-menu accelerator only fires while that menu is open, so the real shortcut is ⌥⌘H inside the switcher panel
+- `menuNeedsUpdate` re-reads `grayscaleIcons` on every open, since it can change from the Preferences window or the terminal
 
 **PreferencesWindowController.swift**
 - Reusable programmatic Preferences window (`isReleasedWhenClosed = false`)
-- Checkboxes: "Start at login" (hidden on macOS < 13), "Show icon in menu bar", "Grayscale icons"; plus a Donate button and version label
+- Checkboxes: "Start at login" (hidden on macOS < 13), "Show icon in menu bar", "Grayscale icons", "Show declutter tip in switcher"; plus Donate and Quit buttons and a version label
 - The "Start at login" checkbox reflects the live `SMAppService` state (not a stored pref); `syncFromPreferences()` refreshes all controls on show
 - `show()` calls `NSApp.activate(ignoringOtherApps:)` + `makeKeyAndOrderFront` so controls are clickable while staying `.accessory` (no Dock icon)
 - `onToggleMenuBar` callback lets AppDelegate show/hide the status item immediately
@@ -147,7 +152,7 @@ Sources/SimpleSwitcher/
 2. `didActivateApplicationNotification` updates MRU list (most recent at index 0)
 3. `didTerminateApplicationNotification` removes terminated apps
 4. `getVisibleApps()` sorts filtered apps by MRU order
-5. Switcher opens with second app selected (index 1) for quick Alt-Tab behavior
+5. Cmd+Tab opens with the second app selected (index 1) for quick Alt-Tab behavior; Cmd+Shift+Tab opens on the last (least recently used) app instead
 
 ## Permissions Required
 
@@ -155,7 +160,7 @@ Sources/SimpleSwitcher/
 - Required for CGEvent tap to detect modifier key changes (Cmd release, Shift press)
 - App checks `AXIsProcessTrusted()` on launch and prompts if missing
 - **Without it the app stays safe**: native Cmd+Tab is left working (never disabled), the menu bar icon's Quit is available, and the app polls — taking over automatically within ~1s of being granted. No zombie state, no Activity Monitor needed.
-- **If revoked while running**: the app restores native Cmd+Tab and quits itself within ~1s (terminating clears the macOS event-tap input-freeze bug). Quitting Switcher *before* revoking avoids any input hiccup.
+- **If revoked while running**: usually nothing happens until relaunch — `AXIsProcessTrusted()` caches per process, so the poll keeps seeing "granted" (see AppDelegate above). That's safe: the tap is `.listenOnly` and cannot freeze input. If the revoke *is* detected, `handleRevocation()` restores native Cmd+Tab and quits, as cleanup rather than as a fix.
 - Implemented in `AccessibilityPermission.swift` + AppDelegate's `enableSwitching`/`handleRevocation`/`startPermissionMonitor`
 
 **Note**: Input Monitoring is NOT required because keyboard shortcuts use Carbon hotkeys (RegisterEventHotKey) instead of CGEvent keyDown monitoring.
@@ -166,7 +171,7 @@ Sources/SimpleSwitcher/
 
 ### Development
 ```bash
-cd /Users/fahd/Claude/SimpleSwitcher
+cd /Users/fahd/Claude/_Constantinapple/SimpleSwitcher
 swift build --disable-sandbox
 .build/debug/SimpleSwitcher
 ```
@@ -185,7 +190,7 @@ swift build -c release --disable-sandbox
 ./create-icon.sh "🔀"
 
 # Build app bundle
-swift build -c release
+swift build -c release --disable-sandbox
 ./build-app.sh release
 ```
 This creates `Switcher.app` which can be moved to `/Applications`.
@@ -213,6 +218,8 @@ Cmd+Shift+Tab from **idle** opens the switcher selecting the last (least recentl
 | Return | Activate selected app |
 | Escape | Dismiss without switching |
 | Release Cmd | Activate selected app |
+
+Every other ordinary Cmd+&lt;key&gt; combo is registered as a no-op while the panel is open, so it is swallowed rather than reaching the app behind (see HotkeyManager's `swallowKeyCodes`).
 
 ## Mouse Behavior
 
@@ -243,7 +250,7 @@ When creating a new release:
 
 1. **Build and create release zip:**
 ```bash
-swift build -c release
+swift build -c release --disable-sandbox
 ./create-icon.sh
 ./build-app.sh release
 zip -r Switcher.zip Switcher.app
@@ -277,7 +284,7 @@ rm Switcher.zip
 
 - [ ] Number keys (1-9) for quick selection
 - [ ] Window thumbnails (requires Screen Recording permission)
-- [x] Preferences window (menu bar icon toggle, grayscale toggle, donate) — basic; shortcuts still code-only
+- [x] Preferences window (menu bar icon, grayscale, declutter tip, donate) — basic; shortcuts still code-only
 - [x] App icon (via create-icon.sh)
 - [ ] Full code signing and notarization (currently ad-hoc signed)
 - [ ] Handle fullscreen apps better
