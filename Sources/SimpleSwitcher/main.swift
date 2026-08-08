@@ -21,6 +21,13 @@ private func emergencyExit() {
     exit(0)
 }
 
+// Diagnostic mode: print the computed app list with a per-app verdict and exit,
+// without registering hotkeys or touching the native Cmd+Tab.
+if CommandLine.arguments.contains("--list-apps") {
+    AppListProvider.printAppListDiagnostic()
+    exit(0)
+}
+
 // Create and run the application
 let app = NSApplication.shared
 let delegate = AppDelegate()

@@ -20,7 +20,13 @@ let package = Package(
             dependencies: ["SwitcherKernels"],
             path: "Sources/SimpleSwitcher",
             linkerSettings: [
-                .linkedFramework("Carbon")
+                .linkedFramework("Carbon"),
+                // SkyLight is a private framework, so it needs both an explicit
+                // link and its search path. Only the SLSWindowQuery* / iterator
+                // symbols require it; CGSSetSymbolicHotKeyEnabled and
+                // CGSMainConnectionID already resolve through CoreGraphics.
+                .linkedFramework("SkyLight"),
+                .unsafeFlags(["-F", "/System/Library/PrivateFrameworks"])
             ]
         ),
         // An executable, not a .testTarget: this machine has only the Command

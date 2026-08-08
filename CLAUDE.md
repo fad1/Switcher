@@ -10,9 +10,9 @@ Switcher intercepts the native Cmd+Tab hotkey and displays a custom switcher pan
 
 It also includes apps with a Dock badge (e.g. Mail with an unread count) even if they have no open window.
 
-**Apps with only minimized windows are NOT filtered out.** The evidence, and why no rule over CGWindowList alone can fix it, lives in `Sources/SwitcherKernels/WindowFilterSpecs.md`. See also Known Limitations.
+**Apps whose windows are all minimized are hidden** (since 1.2.0, pref `hideMinimizedOnlyApps`, default on). CGWindowList cannot tell a minimized window from one on another Space — both are off-screen — so the minimized state comes from the WindowServer's own tag bit, read in one batched private query. Two specs carry the evidence: `WindowFilterSpecs.md` (why CGWindowList alone cannot do it) and `MinimizedStateSpecs.md` (the measured bits, the cost, and the fail-open rules). An app with a Dock badge stays listed regardless — the badge rule is independent.
 
-**Total codebase: ~2470 lines of app across 12 Swift files, plus ~260 lines of pure kernels and ~580 lines of tests**
+**Total codebase: ~2650 lines of app across 12 Swift files, plus ~330 lines of pure kernels and ~720 lines of tests**
 
 ## Architecture
 
@@ -34,6 +34,8 @@ Sources/SimpleSwitcher/
 Sources/SwitcherKernels/    # pure logic, no AppKit / no IPC / no state
 ├── WindowFilter.swift       # which CGWindowList entries count as switchable
 ├── WindowFilterSpecs.md     # its evidence, incl. the minimized-window finding
+├── MinimizedState.swift     # decodes the WindowServer's minimized tag bit
+├── MinimizedStateSpecs.md   # the measured bit positions + state matrix
 ├── ShiftTapResolver.swift   # Shift-tap vs Shift+Tab state machine
 └── GridNavigation.swift     # row/column selection movement
 
@@ -47,8 +49,9 @@ AltTab's triad convention: implementation + `*Specs.md` (evidence) + tests, with
 "Test scenarios" section mirroring the test functions 1:1. The app target depends on it and
 the call sites delegate; the kernels never touch AppKit, IPC or mutable global state.
 
-Three kernels today: `WindowFilter` (the CGWindowList accept/reject predicate, and the only
-one with a spec), `ShiftTapResolver`, `GridNavigation`.
+Four kernels today: `WindowFilter` (the CGWindowList accept/reject predicate),
+`MinimizedState` (the WindowServer tag-bit decode) — both with specs — plus
+`ShiftTapResolver` and `GridNavigation`.
 
 ```bash
 swift run --disable-sandbox SwitcherKernelsTests
@@ -101,7 +104,10 @@ swift-testing is mechanical — one `Check` call per assertion.
 - Maintains MRU (Most Recently Used) order via NSWorkspace notifications
 - `getVisibleApps()`: Returns apps with visible windows OR a Dock badge, sorted by MRU
 - Uses CGWindowListCopyWindowInfo to find visible windows
-- The accept/reject rule itself is `WindowFilter` in SwitcherKernels: 0 <= layer <= 20, bounds >= 50x50, off-screen windows accepted if they have an owner name (covers other Spaces — and, unavoidably, minimized windows). `getVisibleWindowPIDs()` only runs the query and collects PIDs. Evidence and the missing-key defaults: `WindowFilterSpecs.md`
+- The accept/reject rule itself is `WindowFilter` in SwitcherKernels: 0 <= layer <= 20, bounds >= 50x50, off-screen windows accepted if they have an owner name (covers other Spaces — and, before the minimized pass, minimized windows too). Evidence and the missing-key defaults: `WindowFilterSpecs.md`
+- **Minimized pass** (`classifyWindows()`): windows accepted by the **off-screen branch only** get their wids submitted as ONE batched `SLSWindowQueryWindows`; those whose tag bit says minimized are dropped. On-screen windows are never queried, which is what makes the restore race benign — a restored window is back on-screen before the bit clears (~644ms late per AltTab). An app stays listed if ANY of its windows survives, and a Dock badge rescues it regardless. Decode + evidence: `MinimizedState` / `MinimizedStateSpecs.md`
+- **Fails open everywhere**: a failed query, an empty result, or a wid missing from the result all mean "not minimized". A macOS change costs the filtering, never an app the user is looking for
+- `--list-apps` prints the computed list with a per-app verdict (visible / other-Space / minimized-rejected / badge-rescued) plus an EXCLUDED section, then exits without registering hotkeys. Window filtering is otherwise invisible, so this is how "why is X missing" gets diagnosed
 - **Dock badge scan is cached (~2s TTL)**: `getDockBadges()` walks the Dock's AX tree (several IPC round-trips per dock item, on the main thread), and `getVisibleApps()` runs on every Cmd+Tab press plus every 300ms while the panel is open — `getDockBadgesCached()` keeps that off the hot path
 
 **AppSwitcherPanel.swift**
@@ -124,7 +130,7 @@ swift-testing is mechanical — one `Check` call per assertion.
 
 **Preferences.swift**
 - `enum Preferences`: single source of truth for persisted settings over `UserDefaults.standard`
-- Keys: `grayscaleIcons`, `showMenuBarIcon` (defaults to true), `showDeclutterTip` (defaults to true), `launchCount`, `hasDonated`
+- Keys: `grayscaleIcons`, `showMenuBarIcon` (defaults to true), `showDeclutterTip` (defaults to true), `hideMinimizedOnlyApps` (defaults to true), `launchCount`, `hasDonated`
 - `registerDefaults()` must run before any read on every launch (`register(defaults:)` does not persist)
 - `openDonatePage()`: the one choke point for donating — sets `hasDonated = true`, then opens the Ko-fi URL
 
@@ -137,7 +143,7 @@ swift-testing is mechanical — one `Check` call per assertion.
 
 **PreferencesWindowController.swift**
 - Reusable programmatic Preferences window (`isReleasedWhenClosed = false`)
-- Checkboxes: "Start at login" (hidden on macOS < 13), "Show icon in menu bar", "Grayscale icons", "Show declutter tip in switcher"; plus Donate and Quit buttons and a version label
+- Checkboxes: "Start at login" (hidden on macOS < 13), "Show icon in menu bar", "Grayscale icons", "Show declutter tip in switcher", "Hide apps with only minimized windows"; plus Donate and Quit buttons and a version label. The window's `contentRect` height is fixed, so adding a row means growing it
 - The "Start at login" checkbox reflects the live `SMAppService` state (not a stored pref); `syncFromPreferences()` refreshes all controls on show
 - `show()` calls `NSApp.activate(ignoringOtherApps:)` + `makeKeyAndOrderFront` so controls are clickable while staying `.accessory` (no Dock icon)
 - `onToggleMenuBar` callback lets AppDelegate show/hide the status item immediately
@@ -152,6 +158,7 @@ swift-testing is mechanical — one `Check` call per assertion.
 - Declares CGSSetSymbolicHotKeyEnabled using @_silgen_name
 - Disables system Cmd+Tab, Cmd+Shift+Tab, Cmd+` hotkeys
 - Must be restored on app exit (done in emergencyExit and applicationWillTerminate)
+- Also declares the SkyLight window-query family (`SLSWindowQueryWindows` + iterator getters) behind the minimized filter. These need SkyLight **explicitly linked** — see Package.swift, which adds `-F /System/Library/PrivateFrameworks`; `CGSSetSymbolicHotKeyEnabled` and `CGSMainConnectionID` resolve through CoreGraphics without it
 
 ## Key APIs Used
 
@@ -159,6 +166,10 @@ swift-testing is mechanical — one `Check` call per assertion.
 - `CGSSetSymbolicHotKeyEnabled` - Disables system symbolic hotkeys
   - Located in SkyLight.framework (private)
   - Effect persists after app quits; must restore on exit
+- `SLSWindowQueryWindows` / `SLSWindowQueryResultCopyWindows` / `SLSWindowIteratorAdvance` / `SLSWindowIteratorGetWindowID` / `SLSWindowIteratorGetAttributes` / `SLSWindowIteratorGetTags` (+ `CGSMainConnectionID`) - batched WindowServer snapshot behind the minimized filter
+  - ONE IPC per batch; the iterator getters then read a local snapshot, so extra fields are free
+  - Never calls into the target app, so it cannot be blocked by a busy or beach-balling one (unlike AX `kAXMinimized`)
+  - **Undocumented bit positions — re-diff on every major macOS.** `MinimizedStateSpecs.md` holds the measured matrix and points at the probe that produced it; the tests pin the raw values so a shift fails loudly instead of silently mis-filtering
 
 ### Carbon (legacy but required)
 - `RegisterEventHotKey` - Register global hotkey
@@ -195,6 +206,8 @@ swift-testing is mechanical — one `Check` call per assertion.
 
 **Note**: Input Monitoring is NOT required because keyboard shortcuts use Carbon hotkeys (RegisterEventHotKey) instead of CGEvent keyDown monitoring.
 
+**Note**: the minimized filter (1.2.0) added **no permissions**. The SkyLight window query needs none, and Screen Recording is not involved because window titles are never read.
+
 ## Build & Run
 
 > **Use `--disable-sandbox` flag** when building from Claude Code or Sandvault. SPM internally uses `sandbox-exec` which conflicts with the environment sandbox. This is safe — the environment already provides OS-level sandboxing.
@@ -205,7 +218,12 @@ cd /Users/fahd/Claude/_Constantinapple/SimpleSwitcher
 swift build --disable-sandbox
 swift run --disable-sandbox SwitcherKernelsTests   # kernel tests; see Kernels & tests
 .build/debug/SimpleSwitcher
+.build/debug/SimpleSwitcher --list-apps           # what the switcher would show, and why
 ```
+
+Note `--list-apps` on the bare binary reads a different UserDefaults domain than the bundle
+(a non-bundled executable has no bundle id), so to test a **preference** use
+`Switcher.app/Contents/MacOS/SimpleSwitcher --list-apps` instead.
 
 ### Release Build
 ```bash
@@ -265,7 +283,7 @@ Every other ordinary Cmd+&lt;key&gt; combo is registered as a no-op while the pa
 2. **No per-window switching** - Shows apps, not individual windows
 3. **Ad-hoc signed only** - Not notarized, may trigger Gatekeeper warning on first run
 4. **Private API usage** - CGSSetSymbolicHotKeyEnabled may break in future macOS
-5. **Minimized-only apps still appear** - CGWindowList can't distinguish a minimized window from one on another Space (both off-screen). Pinned by `testMinimizedWindowIsIndistinguishableFromOtherSpaceWindow`; the two candidate fixes (per-window AX `AXMinimized`, or the WindowServer's own minimized tag bit) are weighed in `WindowFilterSpecs.md`
+5. **Undocumented WindowServer bits** - the minimized filter reads tag bit 60, measured not documented. Re-diff on every major macOS (`MinimizedStateSpecs.md`); it fails open, so a shift means minimized-only apps reappear rather than apps going missing
 
 ## Threading Notes
 
@@ -281,6 +299,7 @@ When creating a new release:
 
 1. **Build and create release zip:**
 ```bash
+swift run --disable-sandbox SwitcherKernelsTests   # must pass first
 swift build -c release --disable-sandbox
 ./create-icon.sh
 ./build-app.sh release
@@ -313,6 +332,7 @@ rm Switcher.zip
 
 ## Potential Improvements
 
+- [x] Hide apps whose windows are all minimized (1.2.0, via the WindowServer tag bit)
 - [ ] Number keys (1-9) for quick selection
 - [ ] Window thumbnails (requires Screen Recording permission)
 - [x] Preferences window (menu bar icon, grayscale, declutter tip, donate) — basic; shortcuts still code-only

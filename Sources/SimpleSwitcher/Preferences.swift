@@ -12,6 +12,7 @@ enum Preferences {
         static let grayscaleIcons = "grayscaleIcons"
         static let showMenuBarIcon = "showMenuBarIcon"
         static let showDeclutterTip = "showDeclutterTip"
+        static let hideMinimizedOnlyApps = "hideMinimizedOnlyApps"
         static let launchCount = "launchCount"
         static let hasDonated = "hasDonated"
     }
@@ -24,6 +25,7 @@ enum Preferences {
         defaults.register(defaults: [
             Key.showMenuBarIcon: true,
             Key.showDeclutterTip: true,
+            Key.hideMinimizedOnlyApps: true,
         ])
     }
 
@@ -44,6 +46,15 @@ enum Preferences {
     static var showDeclutterTip: Bool {
         get { defaults.bool(forKey: Key.showDeclutterTip) }
         set { defaults.set(newValue, forKey: Key.showDeclutterTip) }
+    }
+
+    /// Whether an app whose windows are ALL minimized is left out of the switcher.
+    /// Defaults to true (see registerDefaults). Read live on every open, so
+    /// toggling it needs no restart. An app with a Dock badge stays listed either
+    /// way — the badge rule is independent of window filtering.
+    static var hideMinimizedOnlyApps: Bool {
+        get { defaults.bool(forKey: Key.hideMinimizedOnlyApps) }
+        set { defaults.set(newValue, forKey: Key.hideMinimizedOnlyApps) }
     }
 
     static var launchCount: Int {

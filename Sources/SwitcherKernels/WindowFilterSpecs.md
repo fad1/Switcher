@@ -42,6 +42,7 @@ Preserved exactly as the switcher has always read them, because they decide edge
 | `Width` / `Height` inside bounds | `0` | `.rejectTooSmall` |
 | `kCGWindowOwnerName` | `nil` | rejected **only** on the off-screen branch |
 | `kCGWindowOwnerPID` | `nil` | window is accepted but contributes no PID |
+| `kCGWindowNumber` | `nil` | window is kept: with no wid it cannot be checked for minimized (see `MinimizedState`'s fail-open rule) |
 
 ## Evidence: minimized windows cannot be excluded here (2026-07, macOS 15 / Darwin 24)
 
@@ -110,3 +111,4 @@ Mirrors `WindowFilterTests.swift` 1:1.
 - **testBoundsMissingWidthOrHeightDecodeToZero** — a partial bounds dict rejects as too small.
 - **testWrongTypesAreTreatedAsMissing** — a string where a number belongs falls back to the
   documented defaults rather than trapping.
+- **testDecodesTheWindowID** — `kCGWindowNumber` is carried through, and is nil when absent.

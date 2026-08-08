@@ -12,10 +12,12 @@ class PreferencesWindowController: NSWindowController {
     private var menuBarCheckbox: NSButton!
     private var grayscaleCheckbox: NSButton!
     private var declutterTipCheckbox: NSButton!
+    private var hideMinimizedCheckbox: NSButton!
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 235),
+            // Height must cover every stack row; a new checkbox needs ~32pt more.
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 270),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -56,6 +58,12 @@ class PreferencesWindowController: NSWindowController {
             action: #selector(toggleDeclutterTip)
         )
 
+        hideMinimizedCheckbox = NSButton(
+            checkboxWithTitle: "Hide apps with only minimized windows",
+            target: self,
+            action: #selector(toggleHideMinimized)
+        )
+
         let donateButton = NSButton(title: "❤️ Donate", target: self, action: #selector(donate))
         donateButton.bezelStyle = .rounded
 
@@ -71,6 +79,7 @@ class PreferencesWindowController: NSWindowController {
             menuBarCheckbox,
             grayscaleCheckbox,
             declutterTipCheckbox,
+            hideMinimizedCheckbox,
             donateButton,
             quitButton,
             versionLabel
@@ -104,6 +113,7 @@ class PreferencesWindowController: NSWindowController {
         menuBarCheckbox.state = Preferences.showMenuBarIcon ? .on : .off
         grayscaleCheckbox.state = Preferences.grayscaleIcons ? .on : .off
         declutterTipCheckbox.state = Preferences.showDeclutterTip ? .on : .off
+        hideMinimizedCheckbox.state = Preferences.hideMinimizedOnlyApps ? .on : .off
     }
 
     private func versionString() -> String {
@@ -133,6 +143,12 @@ class PreferencesWindowController: NSWindowController {
     @objc private func toggleDeclutterTip() {
         // Takes effect on the next Cmd+Tab — the panel re-reads the pref in updateHint().
         Preferences.showDeclutterTip = declutterTipCheckbox.state == .on
+    }
+
+    @objc private func toggleHideMinimized() {
+        // Takes effect on the next Cmd+Tab — AppListProvider re-reads the pref
+        // every time it builds the list.
+        Preferences.hideMinimizedOnlyApps = hideMinimizedCheckbox.state == .on
     }
 
     @objc private func donate() {

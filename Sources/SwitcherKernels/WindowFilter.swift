@@ -13,13 +13,19 @@ public struct RawWindow: Equatable {
     public let isOnScreen: Bool
     public let ownerName: String?
     public let ownerPID: pid_t?
+    /// `kCGWindowNumber`, the id the WindowServer query is keyed on. Nil when the
+    /// key is absent, which makes the window ineligible for the minimized check
+    /// and therefore kept (see `MinimizedState`'s fail-open rule).
+    public let windowID: CGWindowID?
 
-    public init(layer: Int, size: CGSize?, isOnScreen: Bool, ownerName: String?, ownerPID: pid_t?) {
+    public init(layer: Int, size: CGSize?, isOnScreen: Bool, ownerName: String?,
+                ownerPID: pid_t?, windowID: CGWindowID? = nil) {
         self.layer = layer
         self.size = size
         self.isOnScreen = isOnScreen
         self.ownerName = ownerName
         self.ownerPID = ownerPID
+        self.windowID = windowID
     }
 }
 
@@ -88,7 +94,8 @@ public extension RawWindow {
             size: bounds.map { CGSize(width: $0["Width"] ?? 0, height: $0["Height"] ?? 0) },
             isOnScreen: window[kCGWindowIsOnscreen as String] as? Bool ?? false,
             ownerName: window[kCGWindowOwnerName as String] as? String,
-            ownerPID: window[kCGWindowOwnerPID as String] as? pid_t
+            ownerPID: window[kCGWindowOwnerPID as String] as? pid_t,
+            windowID: window[kCGWindowNumber as String] as? CGWindowID
         )
     }
 }

@@ -39,6 +39,7 @@ enum WindowFilterTests {
         Check.run("testMissingBoundsDecodesToNilSize", testMissingBoundsDecodesToNilSize)
         Check.run("testBoundsMissingWidthOrHeightDecodeToZero", testBoundsMissingWidthOrHeightDecodeToZero)
         Check.run("testWrongTypesAreTreatedAsMissing", testWrongTypesAreTreatedAsMissing)
+        Check.run("testDecodesTheWindowID", testDecodesTheWindowID)
     }
 
     // MARK: - A. Layer
@@ -185,5 +186,15 @@ enum WindowFilterTests {
         Check.isNil(raw.size)
         Check.expect(!raw.isOnScreen)
         Check.isNil(raw.ownerPID)
+    }
+
+    /// The wid is what the WindowServer minimized query is keyed on; without it
+    /// a window cannot be checked, and is therefore kept.
+    static func testDecodesTheWindowID() {
+        let withID = RawWindow(cgWindowInfo: [kCGWindowNumber as String: CGWindowID(4242)])
+        Check.equal(withID.windowID, 4242)
+
+        let withoutID = RawWindow(cgWindowInfo: [kCGWindowLayer as String: 0])
+        Check.isNil(withoutID.windowID)
     }
 }

@@ -92,22 +92,82 @@ class AppListProvider {
     /// including fullscreen windows and windows on other Spaces, which
     /// CGWindowList reports as off-screen.
     ///
-    /// The accept/reject rule itself lives in `WindowFilter`; this only does the
-    /// query and the collection. See `WindowFilterSpecs.md`, in particular for why
-    /// the off-screen branch cannot exclude minimized windows.
+    /// The accept/reject rule itself lives in `WindowFilter`; this does the query
+    /// and the collection. Windows accepted by the OFF-SCREEN branch get a second
+    /// pass: CGWindowList cannot tell an other-Space window from a minimized one
+    /// (`WindowFilterSpecs.md`), so their minimized state is read from the
+    /// WindowServer in one batched query (`MinimizedStateSpecs.md`). On-screen
+    /// windows are never touched by that pass, which is also what makes the
+    /// restore race benign.
     private static func getVisibleWindowPIDs() -> Set<pid_t> {
+        classifyWindows().pids
+    }
+
+    /// A window that survived the filter, with the branch that accepted it.
+    struct AcceptedWindow {
+        let pid: pid_t
+        let ownerName: String
+        let wid: CGWindowID?
+        let onScreen: Bool
+        var minimized = false
+    }
+
+    /// Shared by `getVisibleWindowPIDs` and the `--list-apps` diagnostic, so the
+    /// two can never drift apart.
+    static func classifyWindows() -> (pids: Set<pid_t>, windows: [AcceptedWindow]) {
         guard let windowList = CGWindowListCopyWindowInfo([.excludeDesktopElements, .optionAll], kCGNullWindowID) as? [[String: Any]] else {
-            return []
+            return ([], [])
         }
 
-        var pids = Set<pid_t>()
+        var accepted: [AcceptedWindow] = []
         for window in windowList {
             let raw = RawWindow(cgWindowInfo: window)
-            guard WindowFilter.accepts(raw), let pid = raw.ownerPID else { continue }
-            pids.insert(pid)
+            guard case .accept(let onScreen) = WindowFilter.verdict(for: raw),
+                  let pid = raw.ownerPID else { continue }
+            accepted.append(AcceptedWindow(pid: pid, ownerName: raw.ownerName ?? "",
+                                           wid: raw.windowID, onScreen: onScreen))
         }
 
-        return pids
+        if Preferences.hideMinimizedOnlyApps {
+            let candidates = accepted.filter { !$0.onScreen }.compactMap { $0.wid }
+            if !candidates.isEmpty {
+                let minimized = MinimizedState.minimizedWids(among: candidates,
+                                                             states: queryWindowServer(candidates))
+                for index in accepted.indices where !accepted[index].onScreen {
+                    if let wid = accepted[index].wid, minimized.contains(wid) {
+                        accepted[index].minimized = true
+                    }
+                }
+            }
+        }
+
+        // An app stays listed if ANY of its windows survived.
+        let pids = Set(accepted.filter { !$0.minimized }.map { $0.pid })
+        return (pids, accepted)
+    }
+
+    /// One batched `SLSWindowQueryWindows` for the given wids. Impure (Mach IPC),
+    /// so it has no Specs/Tests triad — the pure decode it feeds does.
+    ///
+    /// Returns an empty dictionary on any failure, which `MinimizedState` treats
+    /// as "nothing is minimized", i.e. exactly today's behavior. Every step here
+    /// must fail open: a macOS change may cost us the filtering, never an app.
+    private static func queryWindowServer(_ wids: [CGWindowID]) -> [CGWindowID: WsRawWindow] {
+        guard !wids.isEmpty else { return [:] }
+
+        let result = SLSWindowQueryWindows(CGSMainConnectionID(), wids as CFArray, Int32(wids.count))
+            .takeRetainedValue()
+        let iterator = SLSWindowQueryResultCopyWindows(result).takeRetainedValue()
+
+        var states: [CGWindowID: WsRawWindow] = [:]
+        states.reserveCapacity(wids.count)
+        while SLSWindowIteratorAdvance(iterator) {
+            let wid = SLSWindowIteratorGetWindowID(iterator)
+            states[wid] = WsRawWindow(wid: wid,
+                                      attributes: SLSWindowIteratorGetAttributes(iterator),
+                                      tags: SLSWindowIteratorGetTags(iterator))
+        }
+        return states
     }
 
     // The badge scan walks the Dock's AX tree — several IPC round-trips per dock
@@ -197,6 +257,54 @@ class AppListProvider {
         }
 
         return badges
+    }
+
+    /// `--list-apps`: print what the switcher would show and why, then exit.
+    /// Window filtering is invisible in the UI — an app is either there or it
+    /// isn't — so this is how a "why is X missing / why is X still here" report
+    /// gets diagnosed without guessing.
+    static func printAppListDiagnostic() {
+        Preferences.registerDefaults()
+        // Two snapshots a moment apart (getVisibleApps runs its own). Fine for a
+        // diagnostic; a window opening between them just shows as a mismatch.
+        let (_, windows) = classifyWindows()
+        let apps = getVisibleApps()
+        let listed = Set(apps.map { $0.pid })
+
+        print("hideMinimizedOnlyApps: \(Preferences.hideMinimizedOnlyApps)")
+        print("accepted windows: \(windows.count) (\(windows.filter { $0.onScreen }.count) on-screen, "
+              + "\(windows.filter { !$0.onScreen && !$0.minimized }.count) off-screen kept, "
+              + "\(windows.filter { $0.minimized }.count) minimized-rejected)\n")
+
+        let byPID = Dictionary(grouping: windows, by: { $0.pid })
+        print("SWITCHER LIST (\(apps.count) apps, MRU order):")
+        for app in apps {
+            let mine = byPID[app.pid] ?? []
+            let verdict: String
+            if mine.contains(where: { $0.onScreen }) {
+                verdict = "visible"
+            } else if mine.contains(where: { !$0.minimized }) {
+                verdict = "other-Space"
+            } else if app.badge != nil {
+                verdict = "badge-rescued"
+            } else {
+                verdict = "listed (no surviving window?)"
+            }
+            let badge = app.badge.map { " badge=\($0)" } ?? ""
+            print("  \(app.name.padding(toLength: 28, withPad: " ", startingAt: 0)) \(verdict)\(badge)")
+        }
+
+        // Apps that owned windows but did not make the list — the interesting half.
+        let excluded = byPID.filter { !listed.contains($0.key) }
+        if !excluded.isEmpty {
+            print("\nEXCLUDED (owned accepted windows but not listed):")
+            for (pid, mine) in excluded {
+                let name = mine.first?.ownerName ?? "pid \(pid)"
+                let reason = mine.allSatisfy { $0.minimized } ? "minimized-rejected"
+                    : "hidden / not a regular app / self"
+                print("  \(name.padding(toLength: 28, withPad: " ", startingAt: 0)) \(reason)")
+            }
+        }
     }
 
     /// Sort apps by MRU order (most recently used first)

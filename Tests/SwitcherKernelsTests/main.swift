@@ -5,6 +5,7 @@ import Foundation
 // See TestHarness.swift for why this is an executable rather than `swift test`.
 
 WindowFilterTests.runAll()
+MinimizedStateTests.runAll()
 ShiftTapResolverTests.runAll()
 GridNavigationTests.runAll()
 
