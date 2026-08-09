@@ -13,7 +13,10 @@ let package = Package(
         .target(
             name: "SwitcherKernels",
             path: "Sources/SwitcherKernels",
-            exclude: ["WindowFilterSpecs.md"]
+            // The Specs.md files are documentation co-located with the kernel they
+            // describe (AltTab's triad convention); SwiftPM must be told they are
+            // not resources. A new kernel spec has to be added here too.
+            exclude: ["WindowFilterSpecs.md", "MinimizedStateSpecs.md"]
         ),
         .executableTarget(
             name: "SimpleSwitcher",

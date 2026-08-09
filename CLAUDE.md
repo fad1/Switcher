@@ -29,6 +29,7 @@ Sources/SimpleSwitcher/
 ├── LoginItem.swift      # "Start at login" via SMAppService (macOS 13+)
 ├── StatusBarController.swift     # Optional menu bar icon (NSStatusItem) + menu
 ├── PreferencesWindowController.swift # Programmatic Preferences window
+├── WindowActions.swift  # AX actions on other apps' windows (minimize)
 └── PrivateAPIs.swift    # CGSSetSymbolicHotKeyEnabled binding
 
 Sources/SwitcherKernels/    # pure logic, no AppKit / no IPC / no state
@@ -127,6 +128,11 @@ swift-testing is mechanical — one `Check` call per assertion.
 - Selection highlight (white 30% alpha background)
 - Optional Dock-badge bubble (red, or a neutral sRGB gray when `grayscaleIcons`); counts over 99 render as "99+"
 - **Grayscale is baked into the icon bitmap**, not applied as a layer filter — a CI filter on the item's layer makes CoreAnimation re-rasterize icon+badge whenever the selection highlight changes, which shows up as icons wobbling on hover. The gray is computed in an explicit sRGB colorspace so it doesn't come out bluish on wide-gamut Retina panels
+
+**WindowActions.swift**
+- `minimizeAllWindows(ofPID:)` — the M shortcut. AX is the only way to minimize another app's window (there is no `NSRunningApplication.minimize()`), so unlike the WindowServer *read* path this calls INTO the target app and can stall on a busy one. Acceptable because it runs once on deliberate input, never on the hot path — and it still runs on a background queue with `AXUIElementSetMessagingTimeout` so a hung app can't freeze Switcher
+- Minimizes **every** window, not just the frontmost: the switcher only drops an app once none of its windows survive, so a partial minimize would leave it listed and make the key look broken
+- Fullscreen windows refuse to minimize (macOS behavior), so such an app stays listed — honest, since it is still on screen somewhere
 
 **Preferences.swift**
 - `enum Preferences`: single source of truth for persisted settings over `UserDefaults.standard`
@@ -263,6 +269,7 @@ Cmd+Shift+Tab from **idle** opens the switcher selecting the last (least recentl
 | Down Arrow | Select app in row below (multi-row only) |
 | H | Hide selected app |
 | ⌥⌘H | Hide all other apps (declutter), then dismiss |
+| M | Minimize **every** window of the selected app |
 | Q | Quit selected app |
 | Return | Activate selected app |
 | Escape | Dismiss without switching |

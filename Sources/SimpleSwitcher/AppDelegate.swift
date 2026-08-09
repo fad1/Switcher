@@ -212,6 +212,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         case kVK_ANSI_H:
             hideSelectedApp()
 
+        case kVK_ANSI_M:
+            minimizeSelectedApp()
+
         case kVK_ANSI_Q:
             quitSelectedApp()
 
@@ -275,6 +278,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
             let pid = app.processIdentifier
             if pid == selfPID || pid == frontPID { continue }  // keep ourselves + the front app
             app.hide()
+        }
+    }
+
+    /// M: minimize every window of the selected app and drop it from the panel.
+    ///
+    /// The panel updates immediately while the AX calls run in the background, so
+    /// the keystroke stays responsive even against a busy app. With
+    /// `hideMinimizedOnlyApps` on (the default) the app is then gone from the
+    /// next Cmd+Tab too; with it off, minimizing still works but the app comes
+    /// back in the list, which is the honest result of that setting.
+    private func minimizeSelectedApp() {
+        guard let appToMinimize = panel.removeSelectedApp() else { return }
+
+        WindowActions.minimizeAllWindows(ofPID: appToMinimize.pid)
+        currentApps.removeAll { $0.pid == appToMinimize.pid }
+
+        if !panel.hasApps {
+            dismissPanel()
         }
     }
 
