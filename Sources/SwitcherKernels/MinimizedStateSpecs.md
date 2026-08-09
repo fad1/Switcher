@@ -20,6 +20,10 @@ fails loudly here instead of silently mis-filtering apps out of the switcher.
 - **`attributes & 0x2` = ordered in / on screen.** Cleared by minimize, app-hide, moving to
   another Space, and by a closing window mid-teardown. An ordered-in signal, **not** a
   minimized one — conflating the two is the mistake this whole triad exists to prevent.
+- **`tags & 0x0300000000000000` (bits 56|57) = a window a user can switch to.** Clear on
+  the invisible helper windows apps keep around. Without it, detecting minimized is not
+  enough to hide an app — see "Helper windows" below, which is the bug that shipped in the
+  first cut of 1.2.0.
 
 ## State matrix (2026-08-08, macOS 15.7.9 build 24G830, Darwin 24, arm64)
 
@@ -52,6 +56,50 @@ The bit 60 semantics are identical on both.
 **Not measured here:** the app-hidden bit (AltTab observed bit 39 on macOS 26). Switcher
 never needs it — `getVisibleApps()` already drops hidden apps via `NSRunningApplication`
 `isHidden`, before any of this runs.
+
+## Helper windows — why detecting minimized is not enough (2026-08-09)
+
+The first cut of this feature detected minimized correctly and still failed in the field:
+minimizing Chrome, Signal or Crypto Pro left them in the switcher. The minimized window
+*was* being rejected. What kept the app listed was a **second, invisible window**.
+
+Nearly every app owns an off-screen 500×500 window at (0,400) that is never displayed —
+observed on Signal, KeePassXC, Crypto Pro, Emacs, Activity Monitor, Claude Usage, and
+others. Chromium apps add more: 54×54 stubs and off-screen bubbles. To CGWindowList these
+are indistinguishable from a window on another Space: off-screen, layer 0, ≥50×50, valid
+owner name. And they are genuinely *not* minimized, so bit 60 does not reject them.
+
+Measured on the failing apps (all minimized at the time):
+
+| app | real window | helper window(s) |
+|---|---|---|
+| Crypto Pro | `0x1300000100480001` min, spaces=1:3 | `0x0000000100080001` 500×500, spaces=NONE |
+| Signal | `0x1300000100080401` min, spaces=1:3 | `0x0000000100080001` 500×500, spaces=NONE |
+| KeePassXC | `0x1300002100480001` min, spaces=1:3 | `0x0000000100080001` 500×500, spaces=NONE |
+| Google Chrome | `0x1300000100080401` min, spaces=1:130 | `0x0000000100080001` 54×54 + `0x0000000100080402` + `0x00000001400C0402` bubble, spaces=1:130 |
+
+**Space membership is NOT the discriminator, despite appearances.** Three of the four
+helpers report `spaces=NONE`, which looks decisive until you check a real window on another
+desktop: Ghostty's and Finder's other-Space windows *also* report `spaces=NONE`
+(`0x0300000100480001`). Filtering on Space membership would have hidden every app on
+another desktop — the exact catastrophic failure this filter must never cause. Chrome's
+bubble independently disproves it from the other side: it *does* belong to a Space.
+
+**Bits 56|57 are the discriminator.** Verified across 18 regular apps and ~160 windows:
+
+- Set on every window a user can switch to — on-screen, on another Space, and minimized
+  alike (`0x03` in the top byte; minimized reads `0x13` because bit 60 joins it).
+- Clear on every helper window observed, including Chrome's Space-bearing bubble.
+- The check is **either bit, not both**: ordinary windows read `0x03` but Activity
+  Monitor's on-screen window reads `0x02`.
+- Sweep result: the rule newly hid exactly the four apps that were minimized, and **no app
+  holding an on-screen window**. The only on-screen window lacking the marker belonged to a
+  non-regular app, which can never reach the switcher anyway.
+- An `.accessory` app's window also reads `0x00`. Harmless — `getVisibleApps()` already
+  requires `activationPolicy == .regular`.
+
+The semantics of these two bits are not known, only their behavior. They are treated as an
+opaque measured marker, pinned by tests, exactly like bit 60.
 
 ## Cross-process behavior and cost (same session)
 
@@ -110,7 +158,16 @@ Mirrors `MinimizedStateTests.swift` 1:1.
 - **testOrderedInIsNotAMinimizedSignal** — an ordered-out window that is NOT minimized:
   the two decodes disagree, which is the whole point of having both.
 
-### C. Fail-open policy
+### C. Helper windows
+- **testRealWindowsCarryTheSwitchableMarker** — normal, minimized, restored, other-Space and
+  Activity Monitor's `0x02` variant all carry it.
+- **testHelperWindowsLackTheMarker** — the observed 500×500 helper: not switchable, and
+  genuinely *not* minimized, so the marker is the only thing that rejects it.
+- **testChromiumBubbleIsNotSwitchable** — the helper that belongs to a Space.
+- **testOtherSpaceWindowIsKept** — the regression this must never cause.
+- **testVerdictSeparatesAllThreeCases** — keep / minimized / notSwitchable.
+
+### D. Fail-open policy
 - **testIdentifiesMinimizedCandidates** — the ordinary case, a mixed batch.
 - **testWidMissingFromTheResultIsTreatedAsNotMinimized** — a submitted wid the query did not
   return must survive.

@@ -103,13 +103,18 @@ class AppListProvider {
         classifyWindows().pids
     }
 
-    /// A window that survived the filter, with the branch that accepted it.
+    /// A window that survived the CGWindowList filter, with the branch that
+    /// accepted it and — for off-screen windows — the WindowServer's verdict.
     struct AcceptedWindow {
         let pid: pid_t
         let ownerName: String
         let wid: CGWindowID?
         let onScreen: Bool
-        var minimized = false
+        /// nil means "keeps its app listed": an on-screen window, or an
+        /// off-screen one the WindowServer says is a real window elsewhere.
+        var rejection: MinimizedState.Verdict?
+
+        var keepsAppListed: Bool { rejection == nil }
     }
 
     /// Shared by `getVisibleWindowPIDs` and the `--list-apps` diagnostic, so the
@@ -131,18 +136,18 @@ class AppListProvider {
         if Preferences.hideMinimizedOnlyApps {
             let candidates = accepted.filter { !$0.onScreen }.compactMap { $0.wid }
             if !candidates.isEmpty {
-                let minimized = MinimizedState.minimizedWids(among: candidates,
-                                                             states: queryWindowServer(candidates))
+                let rejected = MinimizedState.rejectedWids(among: candidates,
+                                                           states: queryWindowServer(candidates))
                 for index in accepted.indices where !accepted[index].onScreen {
-                    if let wid = accepted[index].wid, minimized.contains(wid) {
-                        accepted[index].minimized = true
+                    if let wid = accepted[index].wid {
+                        accepted[index].rejection = rejected[wid]
                     }
                 }
             }
         }
 
         // An app stays listed if ANY of its windows survived.
-        let pids = Set(accepted.filter { !$0.minimized }.map { $0.pid })
+        let pids = Set(accepted.filter { $0.keepsAppListed }.map { $0.pid })
         return (pids, accepted)
     }
 
@@ -273,8 +278,9 @@ class AppListProvider {
 
         print("hideMinimizedOnlyApps: \(Preferences.hideMinimizedOnlyApps)")
         print("accepted windows: \(windows.count) (\(windows.filter { $0.onScreen }.count) on-screen, "
-              + "\(windows.filter { !$0.onScreen && !$0.minimized }.count) off-screen kept, "
-              + "\(windows.filter { $0.minimized }.count) minimized-rejected)\n")
+              + "\(windows.filter { !$0.onScreen && $0.keepsAppListed }.count) off-screen kept, "
+              + "\(windows.filter { $0.rejection == .minimized }.count) minimized-rejected, "
+              + "\(windows.filter { $0.rejection == .notSwitchable }.count) helper-windows)\n")
 
         let byPID = Dictionary(grouping: windows, by: { $0.pid })
         print("SWITCHER LIST (\(apps.count) apps, MRU order):")
@@ -283,7 +289,7 @@ class AppListProvider {
             let verdict: String
             if mine.contains(where: { $0.onScreen }) {
                 verdict = "visible"
-            } else if mine.contains(where: { !$0.minimized }) {
+            } else if mine.contains(where: { $0.keepsAppListed }) {
                 verdict = "other-Space"
             } else if app.badge != nil {
                 verdict = "badge-rescued"
@@ -300,8 +306,15 @@ class AppListProvider {
             print("\nEXCLUDED (owned accepted windows but not listed):")
             for (pid, mine) in excluded {
                 let name = mine.first?.ownerName ?? "pid \(pid)"
-                let reason = mine.allSatisfy { $0.minimized } ? "minimized-rejected"
-                    : "hidden / not a regular app / self"
+                let reason: String
+                if mine.contains(where: { $0.rejection == .minimized }) {
+                    let helpers = mine.filter { $0.rejection == .notSwitchable }.count
+                    reason = "minimized-rejected" + (helpers > 0 ? " (+\(helpers) helper-windows)" : "")
+                } else if mine.allSatisfy({ $0.rejection == .notSwitchable }) {
+                    reason = "only helper-windows"
+                } else {
+                    reason = "hidden / not a regular app / self"
+                }
                 print("  \(name.padding(toLength: 28, withPad: " ", startingAt: 0)) \(reason)")
             }
         }
