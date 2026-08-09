@@ -14,16 +14,29 @@ enum WindowActions {
     /// second on a background queue instead of hanging there forever.
     private static let axTimeout: Float = 1.0
 
-    /// Minimize EVERY window of an app.
+    /// Minimize every window of an app that Accessibility can reach.
     ///
-    /// All of them, deliberately: the switcher hides an app only once none of its
-    /// windows survive, so minimizing just the frontmost would leave the app in
-    /// the list and make the keystroke look broken.
+    /// All of them rather than just the frontmost, deliberately: the switcher
+    /// drops an app only once none of its windows survive, so a partial minimize
+    /// would leave it in the list and make the keystroke look broken.
+    ///
+    /// **`kAXWindows` only returns windows on the CURRENT Space** (measured
+    /// 2026-08-09: Ghostty reported 2 AX windows against ~22 real ones parked on
+    /// other Spaces; Brave reported 17, matching its 16 on-screen plus 1
+    /// minimized). Windows on other Spaces therefore stay open and the app
+    /// returns to the switcher on the next Cmd+Tab. AX cannot reach them without
+    /// switching Spaces, so this is a limit of the API, not something to fix here.
     ///
     /// Returns immediately; the work happens on a background queue.
     /// Already-minimized windows are skipped, and fullscreen ones simply refuse
     /// (macOS does not minimize a fullscreen window) — such an app stays listed,
     /// which is honest, since it is still on screen somewhere.
+    ///
+    /// Issuing the calls is not the slow part: all 12 windows of a test app took
+    /// 2.8ms to issue, then ~6s for macOS to animate them into the Dock one at a
+    /// time. Issuing them concurrently instead changed the total by <10%, so the
+    /// sequential loop stays — the animation is the WindowServer's and is not
+    /// ours to parallelize.
     static func minimizeAllWindows(ofPID pid: pid_t) {
         DispatchQueue.global(qos: .userInitiated).async {
             let app = AXUIElementCreateApplication(pid)

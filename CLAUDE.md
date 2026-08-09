@@ -131,6 +131,8 @@ swift-testing is mechanical — one `Check` call per assertion.
 
 **WindowActions.swift**
 - `minimizeAllWindows(ofPID:)` — the M shortcut. AX is the only way to minimize another app's window (there is no `NSRunningApplication.minimize()`), so unlike the WindowServer *read* path this calls INTO the target app and can stall on a busy one. Acceptable because it runs once on deliberate input, never on the hot path — and it still runs on a background queue with `AXUIElementSetMessagingTimeout` so a hung app can't freeze Switcher
+- **Reaches only the current Space.** `kAXWindows` does not return windows on other Spaces (measured 2026-08-09: Ghostty 2 AX windows vs ~22 real; Brave 17 = 16 on-screen + 1 minimized), so those stay open and the app reappears on the next Cmd+Tab. A limit of AX, not a bug to fix here
+- **The wait is macOS's animation, not our loop.** Issuing minimize for 12 windows takes ~2.8ms; the Dock then animates them in one at a time over ~6s. Issuing concurrently changed the total by <10%, so the sequential loop stays. Nothing in Switcher can make this instant — **H (hide) is the instant alternative**, which is the real difference between the two keys
 - Minimizes **every** window, not just the frontmost: the switcher only drops an app once none of its windows survive, so a partial minimize would leave it listed and make the key look broken
 - Fullscreen windows refuse to minimize (macOS behavior), so such an app stays listed — honest, since it is still on screen somewhere
 
@@ -269,7 +271,7 @@ Cmd+Shift+Tab from **idle** opens the switcher selecting the last (least recentl
 | Down Arrow | Select app in row below (multi-row only) |
 | H | Hide selected app |
 | ⌥⌘H | Hide all other apps (declutter), then dismiss |
-| M | Minimize **every** window of the selected app |
+| M | Minimize the selected app's windows **on the current Space** (see WindowActions) |
 | Q | Quit selected app |
 | Return | Activate selected app |
 | Escape | Dismiss without switching |
