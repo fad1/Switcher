@@ -23,6 +23,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     // Polls for newly-opened apps while the panel is shown, so their icons appear as
     // soon as their windows render (see startAppListRefresh).
     private var appListRefreshTimer: DispatchSourceTimer?
+    // Apps the user removed with H / Q / M during THIS panel session. The live
+    // refresh must never re-add them: those actions all complete asynchronously,
+    // so getVisibleApps() keeps reporting the app for a while afterwards — and
+    // since it is no longer in currentApps, the refresh would mistake it for a
+    // newly launched app and append it at the end of the grid. Minimize makes
+    // this obvious (one AX call per window, into the target app), but hide and
+    // quit race it too; they usually just win.
+    private var actedOnPIDs = Set<pid_t>()
     private var activityToken: NSObjectProtocol?
     private var isHandlingRevocation = false
 
@@ -117,6 +125,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     /// (least recently used), matching the native switcher's wrap-around.
     private func openPanel(reverse: Bool) {
         currentApps = AppListProvider.getVisibleApps()
+        actedOnPIDs.removeAll()  // each open starts a fresh session
 
         guard !currentApps.isEmpty else {
             print("No visible apps to switch to")
@@ -257,6 +266,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         guard let appToHide = panel.removeSelectedApp() else { return }
 
         appToHide.app.hide()
+        actedOnPIDs.insert(appToHide.pid)
         currentApps.removeAll { $0.pid == appToHide.pid }
 
         if !panel.hasApps {
@@ -292,6 +302,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         guard let appToMinimize = panel.removeSelectedApp() else { return }
 
         WindowActions.minimizeAllWindows(ofPID: appToMinimize.pid)
+        actedOnPIDs.insert(appToMinimize.pid)
         currentApps.removeAll { $0.pid == appToMinimize.pid }
 
         if !panel.hasApps {
@@ -303,6 +314,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         guard let appToQuit = panel.removeSelectedApp() else { return }
 
         appToQuit.app.terminate()
+        actedOnPIDs.insert(appToQuit.pid)
         currentApps.removeAll { $0.pid == appToQuit.pid }
 
         if !panel.hasApps {
@@ -333,7 +345,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
             guard let self = self, self.state == .active else { return }
             let fresh = AppListProvider.getVisibleApps()
             let known = Set(self.currentApps.map { $0.pid })
-            let additions = fresh.filter { !known.contains($0.pid) }
+            let additions = fresh.filter { !known.contains($0.pid) && !self.actedOnPIDs.contains($0.pid) }
             guard !additions.isEmpty else { return }  // no change → no reflow
             self.currentApps.append(contentsOf: additions)
             self.panel.appendApps(additions)
