@@ -348,13 +348,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
             guard let self = self, self.state == .active else { return }
             let fresh = AppListProvider.getVisibleApps()
             let known = Set(self.currentApps.map { $0.pid })
-            let additions = fresh.filter { !known.contains($0.pid) && !self.actedOnPIDs.contains($0.pid) }
+            var additions = fresh.filter { !known.contains($0.pid) && !self.actedOnPIDs.contains($0.pid) }
+            additions = Array(additions.prefix(self.remainingSlots()))
             guard !additions.isEmpty else { return }  // no change → no reflow
             self.currentApps.append(contentsOf: additions)
             self.panel.appendApps(additions)
         }
         appListRefreshTimer = timer
         timer.resume()
+    }
+
+    /// How many apps the refresh may still append this session. Unbounded unless
+    /// the recent-apps cap is on, since the panel has no way to *remove* an app to
+    /// make room — `appendApps` only ever grows the grid — so without this the
+    /// panel walks past the limit as apps launch.
+    ///
+    /// Apps removed with H/Q/M count against the allowance (via `actedOnPIDs`)
+    /// rather than freeing a slot. Otherwise culling app #3 would promote the old
+    /// #6 into range and the refresh would pop it in ~300ms later, refilling the
+    /// panel as fast as the user empties it. Removals stay monotonic within a
+    /// session; the next Cmd+Tab is a fresh snapshot and shows a full N again.
+    private func remainingSlots() -> Int {
+        guard Preferences.limitRecentApps else { return .max }
+        let limit = max(1, Preferences.recentAppsLimit)
+        return max(0, limit - (currentApps.count + actedOnPIDs.count))
     }
 
     private func stopAppListRefresh() {

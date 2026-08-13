@@ -12,7 +12,7 @@ It also includes apps with a Dock badge (e.g. Mail with an unread count) even if
 
 **Apps whose windows are all minimized are hidden** (since 1.2.0, pref `hideMinimizedOnlyApps`, default on). CGWindowList cannot tell a minimized window from one on another Space — both are off-screen — so the minimized state comes from the WindowServer's own tag bit, read in one batched private query. Two specs carry the evidence: `WindowFilterSpecs.md` (why CGWindowList alone cannot do it) and `MinimizedStateSpecs.md` (the measured bits, the cost, and the fail-open rules). An app with a Dock badge stays listed regardless — the badge rule is independent.
 
-**Total codebase: ~2650 lines of app across 12 Swift files, plus ~330 lines of pure kernels and ~720 lines of tests**
+**Total codebase: ~2900 lines of app across 12 Swift files, plus ~410 lines of pure kernels and ~835 lines of tests**
 
 ## Architecture
 
@@ -38,7 +38,8 @@ Sources/SwitcherKernels/    # pure logic, no AppKit / no IPC / no state
 ├── MinimizedState.swift     # decodes the WindowServer's minimized tag bit
 ├── MinimizedStateSpecs.md   # the measured bit positions + state matrix
 ├── ShiftTapResolver.swift   # Shift-tap vs Shift+Tab state machine
-└── GridNavigation.swift     # row/column selection movement
+├── GridNavigation.swift     # row/column selection movement
+└── RecentApps.swift         # the MRU seed's ordering rule (z-order → ranked pids)
 
 Tests/SwitcherKernelsTests/  # executable test runner (see Kernels & tests)
 ```
@@ -50,9 +51,9 @@ AltTab's triad convention: implementation + `*Specs.md` (evidence) + tests, with
 "Test scenarios" section mirroring the test functions 1:1. The app target depends on it and
 the call sites delegate; the kernels never touch AppKit, IPC or mutable global state.
 
-Four kernels today: `WindowFilter` (the CGWindowList accept/reject predicate),
+Five kernels today: `WindowFilter` (the CGWindowList accept/reject predicate),
 `MinimizedState` (the WindowServer tag-bit decode) — both with specs — plus
-`ShiftTapResolver` and `GridNavigation`.
+`ShiftTapResolver`, `GridNavigation` and `RecentApps`.
 
 ```bash
 swift run --disable-sandbox SwitcherKernelsTests
@@ -77,6 +78,7 @@ swift-testing is mechanical — one `Check` call per assertion.
 - State machine: `idle` <-> `active`
 - Coordinates HotkeyManager and AppSwitcherPanel
 - Handles keyboard shortcuts (Tab, Shift, Arrows, H, Q, Escape, Return)
+- **Live app-list refresh** (`startAppListRefresh`, ~300ms while the panel is open): appends apps whose windows have since rendered. Strictly append-only — it never removes or reorders, so it can't fight the user's own H/Q/M. `remainingSlots()` bounds it under the recent-apps cap, because the panel has no removal-by-pid path (`appendApps` only grows the grid) and would otherwise walk past N. Apps removed with H/Q/M count against the allowance via `actedOnPIDs` rather than freeing a slot — otherwise culling app #3 promotes the old #6 and the panel refills as fast as you empty it. Removals stay monotonic within a session; the next Cmd+Tab is a fresh snapshot at full N
 - Handles mouse clicks (inside panel = activate clicked app, outside = dismiss)
 - **Permission gating**: never disables native Cmd+Tab until the event tap is alive
   - `enableSwitching()`: creates the tap FIRST, and only then disables native Cmd+Tab + registers the Cmd+Tab hotkey (order matters)
@@ -102,13 +104,14 @@ swift-testing is mechanical — one `Check` call per assertion.
 - **Critical**: Sets `isActive` synchronously in event handlers before async delegate calls to avoid race conditions in release builds
 
 **AppListProvider.swift**
-- Maintains MRU (Most Recently Used) order via NSWorkspace notifications
-- `getVisibleApps()`: Returns apps with visible windows OR a Dock badge, sorted by MRU
+- Maintains MRU (Most Recently Used) order via NSWorkspace notifications, seeded at launch from window z-order (see MRU Tracking below)
+- `getVisibleApps()`: Returns apps with visible windows OR a Dock badge, sorted by MRU — and capped to the N most recent when `limitRecentApps` is on
+- **Recent-apps cap** (`limitRecentApps` / `recentAppsLimit`, default off / 5): `allVisibleApps()` is the uncapped list and `getVisibleApps()` is `prefix(N)` of it. That one line is the whole cap, because `sortByMRU` is the codebase's only ordering point and all three consumers (panel open, the 300ms refresh, `--list-apps`) funnel through `getVisibleApps()`. N counts the app you're currently in, so 5 means 5 icons and 4 switch targets. A Dock badge does NOT exempt an app from the cap — it only rescues it past the window filter — so a badged Mail you haven't touched drops off, which is what keeps N predictable. Ships **off**: with it on, apps outside the window are not reachable from the switcher at all. That's the feature, but it's not something to turn on for someone. Side effect at small N: the grid never wraps, so the `⌥⌘H` declutter tip (2+ rows) can no longer appear and `selectUp`/`selectDown` are inert
 - Uses CGWindowListCopyWindowInfo to find visible windows
 - The accept/reject rule itself is `WindowFilter` in SwitcherKernels: 0 <= layer <= 20, bounds >= 50x50, off-screen windows accepted if they have an owner name (covers other Spaces — and, before the minimized pass, minimized windows too). Evidence and the missing-key defaults: `WindowFilterSpecs.md`
 - **Minimized pass** (`classifyWindows()`): windows accepted by the **off-screen branch only** get their wids submitted as ONE batched `SLSWindowQueryWindows`, then get a three-way verdict — keep (a real window on another Space) / minimized / notSwitchable. The third case matters as much as the second: nearly every app owns an invisible off-screen 500×500 helper window that is never minimized, and it alone will hold an app in the switcher forever (this is what made the first cut of 1.2.0 fail on Chrome, Signal and Crypto Pro). Space membership does NOT separate them — genuine other-Space windows also report no Space. On-screen windows are never queried, which is what makes the restore race benign — a restored window is back on-screen before the bit clears (~644ms late per AltTab). An app stays listed if ANY of its windows survives, and a Dock badge rescues it regardless. Decode + evidence: `MinimizedState` / `MinimizedStateSpecs.md`
 - **Fails open everywhere**: a failed query, an empty result, or a wid missing from the result all mean "not minimized". A macOS change costs the filtering, never an app the user is looking for
-- `--list-apps` prints the computed list with a per-app verdict (visible / other-Space / minimized-rejected / badge-rescued) plus an EXCLUDED section, then exits without registering hotkeys. Window filtering is otherwise invisible, so this is how "why is X missing" gets diagnosed
+- `--list-apps` prints the computed list with a per-app verdict (visible / other-Space / minimized-rejected / badge-rescued) plus an EXCLUDED section, then exits without registering hotkeys. Window filtering is otherwise invisible, so this is how "why is X missing" gets diagnosed. It reports from the **uncapped** `allVisibleApps()` and draws a cut line where the recent-apps limit falls — otherwise capped-out apps would land in EXCLUDED labelled "hidden / not a regular app", which is a lie told by the exact tool you'd use to catch it
 - **Dock badge scan is cached (~2s TTL)**: `getDockBadges()` walks the Dock's AX tree (several IPC round-trips per dock item, on the main thread), and `getVisibleApps()` runs on every Cmd+Tab press plus every 300ms while the panel is open — `getDockBadgesCached()` keeps that off the hot path
 
 **AppSwitcherPanel.swift**
@@ -138,7 +141,8 @@ swift-testing is mechanical — one `Check` call per assertion.
 
 **Preferences.swift**
 - `enum Preferences`: single source of truth for persisted settings over `UserDefaults.standard`
-- Keys: `grayscaleIcons`, `showMenuBarIcon` (defaults to true), `showDeclutterTip` (defaults to true), `hideMinimizedOnlyApps` (defaults to true), `launchCount`, `hasDonated`
+- Keys: `grayscaleIcons`, `showMenuBarIcon` (defaults to true), `showDeclutterTip` (defaults to true), `hideMinimizedOnlyApps` (defaults to true), `limitRecentApps`, `recentAppsLimit` (defaults to 5), `launchCount`, `hasDonated`
+- The recent-apps cap is deliberately **two** keys rather than "0 means off": switching it off and back on must not discard a tuned count. The count is registered, the switch is not (so it ships off, like `grayscaleIcons`)
 - `registerDefaults()` must run before any read on every launch (`register(defaults:)` does not persist)
 - `openDonatePage()`: the one choke point for donating — sets `hasDonated = true`, then opens the Ko-fi URL
 
@@ -151,7 +155,8 @@ swift-testing is mechanical — one `Check` call per assertion.
 
 **PreferencesWindowController.swift**
 - Reusable programmatic Preferences window (`isReleasedWhenClosed = false`)
-- Checkboxes: "Start at login" (hidden on macOS < 13), "Show icon in menu bar", "Grayscale icons", "Show declutter tip in switcher", "Hide apps with only minimized windows"; plus Donate and Quit buttons and a version label. The window's `contentRect` height is fixed, so adding a row means growing it
+- Checkboxes: "Start at login" (hidden on macOS < 13), "Show icon in menu bar", "Grayscale icons", "Show declutter tip in switcher", "Hide apps with only minimized windows", and "Show only the [N] most recently used apps" (a horizontal sub-stack: checkbox + `NSPopUpButton` 2…12 + label, popup disabled while the checkbox is off); plus Donate and Quit buttons and a version label. The window's `contentRect` height is fixed, so adding a row means growing it
+- The count is a popup, not a text field, on purpose: no formatter, no clamping, no half-typed state to validate for a number with a handful of sensible values
 - The "Start at login" checkbox reflects the live `SMAppService` state (not a stored pref); `syncFromPreferences()` refreshes all controls on show
 - `show()` calls `NSApp.activate(ignoringOtherApps:)` + `makeKeyAndOrderFront` so controls are clickable while staying `.accessory` (no Dock icon)
 - `onToggleMenuBar` callback lets AppDelegate show/hide the status item immediately
@@ -197,11 +202,24 @@ swift-testing is mechanical — one `Check` call per assertion.
 
 ## MRU (Most Recently Used) Tracking
 
-1. On launch, `AppListProvider.startObserving()` registers for workspace notifications
+1. On launch, `AppListProvider.startObserving()` **seeds** the MRU order, then registers for workspace notifications
 2. `didActivateApplicationNotification` updates MRU list (most recent at index 0)
 3. `didTerminateApplicationNotification` removes terminated apps
 4. `getVisibleApps()` sorts filtered apps by MRU order
 5. Cmd+Tab opens with the second app selected (index 1) for quick Alt-Tab behavior; Cmd+Shift+Tab opens on the last (least recently used) app instead
+
+**The seed** (`seedMRU()`): only activations that happen while Switcher is running feed the
+MRU list, so without a seed exactly one app has a rank and every other ties at `Int.max` in
+`sortByMRU` — an arbitrary tail. That was invisible while the switcher listed everything, but
+under the recent-apps cap it decides which apps are reachable at all, and it would reset on
+every relaunch. So `mruOrder` is seeded from `classifyWindows().windows` in CGWindowList's
+front-to-back order (use `.windows`, which is ordered — `.pids` is a `Set`), deduped to first
+occurrence per app, with the frontmost app forced to the head. Ordering rule + tests:
+`RecentApps`. macOS keeps no queryable activation history, so **z-order is a proxy for
+recency, not a record of it** — accurate on the current Space, weaker across Spaces. The
+ceiling is one launch: real activations replace it from the first Cmd+Tab onward. This is
+also why `Preferences.registerDefaults()` must run *before* `startObserving()` in
+`applicationDidFinishLaunching` — the seed's window query reads `hideMinimizedOnlyApps`.
 
 ## Permissions Required
 
@@ -342,6 +360,8 @@ rm Switcher.zip
 ## Potential Improvements
 
 - [x] Hide apps whose windows are all minimized (1.2.0, via the WindowServer tag bit)
+- [x] Cap the switcher to the N most recently used apps (`limitRecentApps`, default off — under evaluation)
+- [ ] Persist `mruOrder` across launches, so the recent-apps cap doesn't fall back to the z-order proxy after a restart
 - [ ] Number keys (1-9) for quick selection
 - [ ] Window thumbnails (requires Screen Recording permission)
 - [x] Preferences window (menu bar icon, grayscale, declutter tip, donate) — basic; shortcuts still code-only

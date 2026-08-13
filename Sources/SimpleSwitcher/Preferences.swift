@@ -13,6 +13,8 @@ enum Preferences {
         static let showMenuBarIcon = "showMenuBarIcon"
         static let showDeclutterTip = "showDeclutterTip"
         static let hideMinimizedOnlyApps = "hideMinimizedOnlyApps"
+        static let limitRecentApps = "limitRecentApps"
+        static let recentAppsLimit = "recentAppsLimit"
         static let launchCount = "launchCount"
         static let hasDonated = "hasDonated"
     }
@@ -26,6 +28,9 @@ enum Preferences {
             Key.showMenuBarIcon: true,
             Key.showDeclutterTip: true,
             Key.hideMinimizedOnlyApps: true,
+            // The count is registered but the switch is not: the cap ships off,
+            // and this is the number it takes when first turned on.
+            Key.recentAppsLimit: 5,
         ])
     }
 
@@ -55,6 +60,26 @@ enum Preferences {
     static var hideMinimizedOnlyApps: Bool {
         get { defaults.bool(forKey: Key.hideMinimizedOnlyApps) }
         set { defaults.set(newValue, forKey: Key.hideMinimizedOnlyApps) }
+    }
+
+    /// Whether the switcher is capped to the `recentAppsLimit` most recently used
+    /// apps. Defaults to false — with it on, apps outside that window are not
+    /// reachable from the switcher at all, which is the point but is not something
+    /// to turn on for someone. Read live on every list build, so no restart.
+    ///
+    /// Kept separate from the count rather than overloading "0 means off", so
+    /// switching it off and on again doesn't discard a tuned number.
+    static var limitRecentApps: Bool {
+        get { defaults.bool(forKey: Key.limitRecentApps) }
+        set { defaults.set(newValue, forKey: Key.limitRecentApps) }
+    }
+
+    /// How many apps the switcher shows when `limitRecentApps` is on, counting the
+    /// app you are currently in (so 5 means 5 icons and 4 switch targets).
+    /// Defaults to 5 (see registerDefaults).
+    static var recentAppsLimit: Int {
+        get { defaults.integer(forKey: Key.recentAppsLimit) }
+        set { defaults.set(newValue, forKey: Key.recentAppsLimit) }
     }
 
     static var launchCount: Int {

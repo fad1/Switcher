@@ -73,9 +73,27 @@ class AppListProvider {
         }
     }
 
-    /// The switcher's app list, MRU-ordered. A badge alone qualifies an app, so
-    /// e.g. Mail with an unread count is listed even with no window at all.
+    /// The switcher's app list, MRU-ordered — what actually gets shown.
+    ///
+    /// With `limitRecentApps` on this is only the N most recently used apps and
+    /// everything older is dropped, including badged apps: a badge rescues an app
+    /// past the window filter, it does not exempt it from the cap, so a badged
+    /// Mail you haven't touched in an hour still falls off. That is what "the 5
+    /// most recently used" means, and the alternative would make N unpredictable.
+    ///
+    /// The cap lives here, at the single point every consumer funnels through —
+    /// panel open, the live refresh, and `--list-apps`.
     static func getVisibleApps() -> [AppInfo] {
+        let apps = allVisibleApps()
+        guard Preferences.limitRecentApps else { return apps }
+        return Array(apps.prefix(max(1, Preferences.recentAppsLimit)))
+    }
+
+    /// Every app that passes the window/badge filter, MRU-ordered and uncapped. A
+    /// badge alone qualifies an app, so e.g. Mail with an unread count is here
+    /// even with no window at all. `--list-apps` reports from this, so it can show
+    /// what the cap cut rather than losing those apps.
+    static func allVisibleApps() -> [AppInfo] {
         let visiblePIDs = getVisibleWindowPIDs()
         let badges = getDockBadgesCached()
         let selfPID = ProcessInfo.processInfo.processIdentifier
@@ -289,21 +307,32 @@ class AppListProvider {
     /// gets diagnosed without guessing.
     static func printAppListDiagnostic() {
         Preferences.registerDefaults()
-        // Two snapshots a moment apart (getVisibleApps runs its own). Fine for a
+        startObserving()  // seeds mruOrder, or every app ties and "MRU order" is a lie
+        // Two snapshots a moment apart (allVisibleApps runs its own). Fine for a
         // diagnostic; a window opening between them just shows as a mismatch.
         let (_, windows) = classifyWindows()
-        let apps = getVisibleApps()
+        // Deliberately the UNCAPPED list: apps cut by the recent-apps limit are
+        // shown below a cut line instead of falling into EXCLUDED, where they
+        // would be reported as "hidden / not a regular app" — a plain lie, and
+        // this is the tool for answering "why is X missing".
+        let apps = allVisibleApps()
         let listed = Set(apps.map { $0.pid })
+        let cutoff = Preferences.limitRecentApps ? max(1, Preferences.recentAppsLimit) : Int.max
 
         print("hideMinimizedOnlyApps: \(Preferences.hideMinimizedOnlyApps)")
+        print("limitRecentApps: \(Preferences.limitRecentApps)"
+              + (Preferences.limitRecentApps ? " (\(Preferences.recentAppsLimit) apps)" : ""))
         print("accepted windows: \(windows.count) (\(windows.filter { $0.onScreen }.count) on-screen, "
               + "\(windows.filter { !$0.onScreen && $0.keepsAppListed }.count) off-screen kept, "
               + "\(windows.filter { $0.rejection == .minimized }.count) minimized-rejected, "
               + "\(windows.filter { $0.rejection == .notSwitchable }.count) helper-windows)\n")
 
         let byPID = Dictionary(grouping: windows, by: { $0.pid })
-        print("SWITCHER LIST (\(apps.count) apps, MRU order):")
-        for app in apps {
+        print("SWITCHER LIST (\(min(apps.count, cutoff)) apps, MRU order):")
+        for (index, app) in apps.enumerated() {
+            if index == cutoff {
+                print("  ── recent-apps limit (\(cutoff)) — everything below is NOT shown ──")
+            }
             let mine = byPID[app.pid] ?? []
             let verdict: String
             if mine.contains(where: { $0.onScreen }) {

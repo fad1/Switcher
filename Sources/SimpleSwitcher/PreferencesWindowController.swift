@@ -13,11 +13,13 @@ class PreferencesWindowController: NSWindowController {
     private var grayscaleCheckbox: NSButton!
     private var declutterTipCheckbox: NSButton!
     private var hideMinimizedCheckbox: NSButton!
+    private var limitRecentCheckbox: NSButton!
+    private var recentLimitPopup: NSPopUpButton!
 
     convenience init() {
         let window = NSWindow(
             // Height must cover every stack row; a new checkbox needs ~32pt more.
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 270),
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 302),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -64,6 +66,30 @@ class PreferencesWindowController: NSWindowController {
             action: #selector(toggleHideMinimized)
         )
 
+        limitRecentCheckbox = NSButton(
+            checkboxWithTitle: "Show only the",
+            target: self,
+            action: #selector(toggleLimitRecent)
+        )
+        // A popup rather than a text field: the count has a handful of sensible
+        // values, and this way there is no formatter, no clamping and no
+        // half-typed state to validate.
+        recentLimitPopup = NSPopUpButton()
+        recentLimitPopup.addItems(withTitles: (2...12).map(String.init))
+        recentLimitPopup.target = self
+        recentLimitPopup.action = #selector(changeRecentLimit)
+
+        // The count reads as part of the sentence, so the row is one line:
+        // "Show only the [5] most recently used apps".
+        let limitRow = NSStackView(views: [
+            limitRecentCheckbox,
+            recentLimitPopup,
+            NSTextField(labelWithString: "most recently used apps")
+        ])
+        limitRow.orientation = .horizontal
+        limitRow.alignment = .firstBaseline
+        limitRow.spacing = 6
+
         let donateButton = NSButton(title: "❤️ Donate", target: self, action: #selector(donate))
         donateButton.bezelStyle = .rounded
 
@@ -80,6 +106,7 @@ class PreferencesWindowController: NSWindowController {
             grayscaleCheckbox,
             declutterTipCheckbox,
             hideMinimizedCheckbox,
+            limitRow,
             donateButton,
             quitButton,
             versionLabel
@@ -114,6 +141,14 @@ class PreferencesWindowController: NSWindowController {
         grayscaleCheckbox.state = Preferences.grayscaleIcons ? .on : .off
         declutterTipCheckbox.state = Preferences.showDeclutterTip ? .on : .off
         hideMinimizedCheckbox.state = Preferences.hideMinimizedOnlyApps ? .on : .off
+        limitRecentCheckbox.state = Preferences.limitRecentApps ? .on : .off
+        // selectItem(withTitle:) on a value not in the list leaves nothing
+        // selected, so fall back to the registered default.
+        recentLimitPopup.selectItem(withTitle: String(Preferences.recentAppsLimit))
+        if recentLimitPopup.indexOfSelectedItem < 0 {
+            recentLimitPopup.selectItem(withTitle: "5")
+        }
+        recentLimitPopup.isEnabled = Preferences.limitRecentApps
     }
 
     private func versionString() -> String {
@@ -149,6 +184,18 @@ class PreferencesWindowController: NSWindowController {
         // Takes effect on the next Cmd+Tab — AppListProvider re-reads the pref
         // every time it builds the list.
         Preferences.hideMinimizedOnlyApps = hideMinimizedCheckbox.state == .on
+    }
+
+    @objc private func toggleLimitRecent() {
+        // Takes effect on the next Cmd+Tab — AppListProvider re-reads the pref
+        // every time it builds the list.
+        Preferences.limitRecentApps = limitRecentCheckbox.state == .on
+        recentLimitPopup.isEnabled = Preferences.limitRecentApps
+    }
+
+    @objc private func changeRecentLimit() {
+        guard let title = recentLimitPopup.titleOfSelectedItem, let count = Int(title) else { return }
+        Preferences.recentAppsLimit = count
     }
 
     @objc private func donate() {
