@@ -19,10 +19,7 @@ class AppListProvider {
         guard !isObserving else { return }
         isObserving = true
 
-        // Initialize with current frontmost app
-        if let frontApp = NSWorkspace.shared.frontmostApplication {
-            updateMRU(frontApp.processIdentifier)
-        }
+        seedMRU()
 
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
@@ -43,6 +40,28 @@ class AppListProvider {
                 mruOrder.removeAll { $0 == app.processIdentifier }
             }
         }
+    }
+
+    /// Seed the MRU order at launch from window z-order.
+    ///
+    /// Only activations that happen while Switcher is running feed `mruOrder`, so
+    /// without a seed exactly one app has a rank and every other ties at `Int.max`
+    /// in `sortByMRU` — an arbitrary tail. Invisible while the switcher lists
+    /// everything; under `limitRecentApps` it decides which apps are reachable at
+    /// all, and it would reset on every relaunch.
+    ///
+    /// ponytail: CGWindowList's front-to-back order is a *proxy* for recency, not
+    /// a record of it — accurate for the current Space, weaker across Spaces, and
+    /// blind to anything used before the last window raise. macOS keeps no
+    /// queryable activation history, so this is the best available signal; the
+    /// ceiling is one launch, since real activations replace it from the first
+    /// Cmd+Tab onward. Upgrade path: persist `mruOrder` across launches.
+    private static func seedMRU() {
+        let owners = classifyWindows().windows
+            .filter { $0.onScreen && $0.keepsAppListed }
+            .map { $0.pid }
+        mruOrder = RecentApps.orderedUnique(pids: owners,
+                                            frontmost: NSWorkspace.shared.frontmostApplication?.processIdentifier)
     }
 
     /// Update MRU order when an app is activated

@@ -8,5 +8,6 @@ WindowFilterTests.runAll()
 MinimizedStateTests.runAll()
 ShiftTapResolverTests.runAll()
 GridNavigationTests.runAll()
+RecentAppsTests.runAll()
 
 exit(Check.summarize())

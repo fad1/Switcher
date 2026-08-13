@@ -35,6 +35,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     private var isHandlingRevocation = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Settings: register in-process fallbacks before any read, then count this
+        // launch. Must precede startObserving, whose MRU seed queries the window
+        // list and would otherwise read hideMinimizedOnlyApps as an unregistered
+        // false, seeding from windows the switcher will never show.
+        Preferences.registerDefaults()
+        Preferences.launchCount += 1
+
         AppListProvider.startObserving()
 
         // Setup hotkey manager (does NOT take over Cmd+Tab yet — see enableSwitching)
@@ -47,10 +54,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
 
         // Set app to accessory (no dock icon)
         NSApp.setActivationPolicy(.accessory)
-
-        // Settings: register in-process fallbacks before any read, then count this launch.
-        Preferences.registerDefaults()
-        Preferences.launchCount += 1
 
         // Menu bar icon (optional, controlled by preferences). Provides a Quit
         // escape hatch even while we're waiting for Accessibility permission.
