@@ -31,6 +31,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     // this obvious (one AX call per window, into the target app), but hide and
     // quit race it too; they usually just win.
     private var actedOnPIDs = Set<pid_t>()
+    // True when THIS panel session shows the full uncapped list (⌥⌘Tab past the
+    // recent-apps cap). One-shot: openPanel decides it afresh on every open, so
+    // dismissal needs no cleanup.
+    private var expandedSession = false
     private var activityToken: NSObjectProtocol?
     private var isHandlingRevocation = false
 
@@ -65,6 +69,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         // Preferences window (reusable single instance, hidden until requested)
         prefsWindowController = PreferencesWindowController()
         prefsWindowController.onToggleMenuBar = { [weak self] _ in self?.refreshStatusItem() }
+        prefsWindowController.onToggleLimitRecent = { [weak self] enabled in
+            // Guarded inside HotkeyManager: no-ops until registerHotkeys() has
+            // run, so a pre-permission toggle can't squat ⌥⌘Tab system-wide.
+            if enabled {
+                self?.hotkeyManager.registerShowAllHotkey()
+            } else {
+                self?.hotkeyManager.unregisterShowAllHotkey()
+            }
+        }
 
         // Only take over Cmd+Tab once Accessibility permission is confirmed. Until
         // then, native Cmd+Tab is left working — so a first launch without
@@ -123,11 +136,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         openPanel(reverse: true)
     }
 
+    func hotkeyTriggeredShowAll() {
+        // HotkeyManager already set isActive = true
+        guard state == .idle else {
+            if expandedSession {
+                // Already showing everything — behave like Cmd+Tab, so holding
+                // ⌘⌥ and tapping Tab cycles the full list.
+                panel.selectNext()
+            } else {
+                // The expanding press only expands; no advance.
+                expandToFullList()
+            }
+            return
+        }
+        openPanel(reverse: false, expanded: true)
+    }
+
     /// Snapshot the visible apps and show the panel. Forward opens on the
     /// second app (quick Alt-Tab back-and-forth); reverse opens on the last
     /// (least recently used), matching the native switcher's wrap-around.
-    private func openPanel(reverse: Bool) {
-        currentApps = AppListProvider.getVisibleApps()
+    private func openPanel(reverse: Bool, expanded: Bool = false) {
+        expandedSession = expanded  // every open decides afresh
+        currentApps = expanded ? AppListProvider.allVisibleApps()
+                               : AppListProvider.getVisibleApps()
         actedOnPIDs.removeAll()  // each open starts a fresh session
 
         guard !currentApps.isEmpty else {
@@ -353,16 +384,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         timer.schedule(deadline: .now() + 0.3, repeating: 0.3, leeway: .milliseconds(100))
         timer.setEventHandler { [weak self] in
             guard let self = self, self.state == .active else { return }
-            let fresh = AppListProvider.getVisibleApps()
-            let known = Set(self.currentApps.map { $0.pid })
-            var additions = fresh.filter { !known.contains($0.pid) && !self.actedOnPIDs.contains($0.pid) }
-            additions = Array(additions.prefix(self.remainingSlots()))
-            guard !additions.isEmpty else { return }  // no change → no reflow
-            self.currentApps.append(contentsOf: additions)
-            self.panel.appendApps(additions)
+            self.appendNewlyVisibleApps()
         }
         appListRefreshTimer = timer
         timer.resume()
+    }
+
+    /// One append pass: fetch this session's source list (uncapped when expanded),
+    /// drop pids already shown or acted on, cap to remainingSlots(), append the
+    /// rest. Shared by the 300ms refresh and the ⌥⌘Tab expansion. Keeping
+    /// getVisibleApps() as the non-expanded source matters: a freshly launched app
+    /// has no MRU rank, sorts last, and must stay cut in a capped session.
+    private func appendNewlyVisibleApps() {
+        let fresh = expandedSession ? AppListProvider.allVisibleApps()
+                                    : AppListProvider.getVisibleApps()
+        let known = Set(currentApps.map { $0.pid })
+        var additions = fresh.filter { !known.contains($0.pid) && !actedOnPIDs.contains($0.pid) }
+        additions = Array(additions.prefix(remainingSlots()))
+        guard !additions.isEmpty else { return }  // no change → no reflow
+        currentApps.append(contentsOf: additions)
+        panel.appendApps(additions)
+    }
+
+    /// ⌥⌘Tab while the capped panel is open: append every app the cap cut, after
+    /// the existing icons — append-only like the refresh, so positions and the
+    /// current selection never move.
+    private func expandToFullList() {
+        expandedSession = true  // set FIRST: makes the pass uncapped, slots unlimited
+        appendNewlyVisibleApps()
     }
 
     /// How many apps the refresh may still append this session. Unbounded unless
@@ -375,8 +424,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
     /// #6 into range and the refresh would pop it in ~300ms later, refilling the
     /// panel as fast as the user empties it. Removals stay monotonic within a
     /// session; the next Cmd+Tab is a fresh snapshot and shows a full N again.
+    /// Expanded (⌥⌘Tab) sessions are unbounded by construction.
     private func remainingSlots() -> Int {
-        guard Preferences.limitRecentApps else { return .max }
+        guard Preferences.limitRecentApps, !expandedSession else { return .max }
         let limit = max(1, Preferences.recentAppsLimit)
         return max(0, limit - (currentApps.count + actedOnPIDs.count))
     }

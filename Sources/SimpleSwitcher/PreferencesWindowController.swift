@@ -8,6 +8,10 @@ class PreferencesWindowController: NSWindowController {
     /// can show/hide the status item live. Carries the new value.
     var onToggleMenuBar: ((Bool) -> Void)?
 
+    /// Invoked when the recent-apps cap checkbox changes, so the caller can
+    /// register/unregister the ⌥⌘Tab show-all hotkey live. Carries the new value.
+    var onToggleLimitRecent: ((Bool) -> Void)?
+
     private var launchAtLoginCheckbox: NSButton!
     private var menuBarCheckbox: NSButton!
     private var grayscaleCheckbox: NSButton!
@@ -15,11 +19,13 @@ class PreferencesWindowController: NSWindowController {
     private var hideMinimizedCheckbox: NSButton!
     private var limitRecentCheckbox: NSButton!
     private var recentLimitPopup: NSPopUpButton!
+    private var limitHintLabel: NSTextField!
 
     convenience init() {
         let window = NSWindow(
-            // Height must cover every stack row; a new checkbox needs ~32pt more.
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 302),
+            // Height must cover every stack row; a new checkbox needs ~32pt more
+            // (the recent-apps hint sub-row accounts for 18 of the current total).
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 320),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -90,6 +96,12 @@ class PreferencesWindowController: NSWindowController {
         limitRow.alignment = .firstBaseline
         limitRow.spacing = 6
 
+        // The ⌥⌘Tab escape hatch is otherwise invisible; hidden (and collapsed by
+        // the stack view) while the cap is off, when the hotkey isn't registered.
+        limitHintLabel = NSTextField(labelWithString: "⌥⌘Tab shows all apps")
+        limitHintLabel.font = .systemFont(ofSize: 11)
+        limitHintLabel.textColor = .secondaryLabelColor
+
         let donateButton = NSButton(title: "❤️ Donate", target: self, action: #selector(donate))
         donateButton.bezelStyle = .rounded
 
@@ -107,6 +119,7 @@ class PreferencesWindowController: NSWindowController {
             declutterTipCheckbox,
             hideMinimizedCheckbox,
             limitRow,
+            limitHintLabel,
             donateButton,
             quitButton,
             versionLabel
@@ -115,6 +128,7 @@ class PreferencesWindowController: NSWindowController {
         stack.alignment = .leading
         stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.setCustomSpacing(3, after: limitRow)  // the hint reads as part of its row
         contentView.addSubview(stack)
 
         NSLayoutConstraint.activate([
@@ -149,6 +163,7 @@ class PreferencesWindowController: NSWindowController {
             recentLimitPopup.selectItem(withTitle: "7")
         }
         recentLimitPopup.isEnabled = Preferences.limitRecentApps
+        limitHintLabel.isHidden = !Preferences.limitRecentApps
     }
 
     private func versionString() -> String {
@@ -188,9 +203,12 @@ class PreferencesWindowController: NSWindowController {
 
     @objc private func toggleLimitRecent() {
         // Takes effect on the next Cmd+Tab — AppListProvider re-reads the pref
-        // every time it builds the list.
+        // every time it builds the list. The ⌥⌘Tab hotkey flips immediately,
+        // via the callback.
         Preferences.limitRecentApps = limitRecentCheckbox.state == .on
         recentLimitPopup.isEnabled = Preferences.limitRecentApps
+        limitHintLabel.isHidden = !Preferences.limitRecentApps
+        onToggleLimitRecent?(Preferences.limitRecentApps)
     }
 
     @objc private func changeRecentLimit() {

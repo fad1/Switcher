@@ -12,7 +12,7 @@ It also includes apps with a Dock badge (e.g. Mail with an unread count) even if
 
 **Apps whose windows are all minimized are hidden** (since 1.2.0, pref `hideMinimizedOnlyApps`, default on). CGWindowList cannot tell a minimized window from one on another Space — both are off-screen — so the minimized state comes from the WindowServer's own tag bit, read in one batched private query. Two specs carry the evidence: `WindowFilterSpecs.md` (why CGWindowList alone cannot do it) and `MinimizedStateSpecs.md` (the measured bits, the cost, and the fail-open rules). An app with a Dock badge stays listed regardless — the badge rule is independent.
 
-**Total codebase: ~2900 lines of app across 12 Swift files, plus ~410 lines of pure kernels and ~835 lines of tests**
+**Total codebase: ~3000 lines of app across 13 Swift files, plus ~410 lines of pure kernels and ~835 lines of tests**
 
 ## Architecture
 
@@ -78,7 +78,7 @@ swift-testing is mechanical — one `Check` call per assertion.
 - State machine: `idle` <-> `active`
 - Coordinates HotkeyManager and AppSwitcherPanel
 - Handles keyboard shortcuts (Tab, Shift, Arrows, H, Q, Escape, Return)
-- **Live app-list refresh** (`startAppListRefresh`, ~300ms while the panel is open): appends apps whose windows have since rendered. Strictly append-only — it never removes or reorders, so it can't fight the user's own H/Q/M. `remainingSlots()` bounds it under the recent-apps cap, because the panel has no removal-by-pid path (`appendApps` only grows the grid) and would otherwise walk past N. Apps removed with H/Q/M count against the allowance via `actedOnPIDs` rather than freeing a slot — otherwise culling app #3 promotes the old #6 and the panel refills as fast as you empty it. Removals stay monotonic within a session; the next Cmd+Tab is a fresh snapshot at full N
+- **Live app-list refresh** (`startAppListRefresh`, ~300ms while the panel is open): appends apps whose windows have since rendered. Strictly append-only — it never removes or reorders, so it can't fight the user's own H/Q/M. `remainingSlots()` bounds it under the recent-apps cap, because the panel has no removal-by-pid path (`appendApps` only grows the grid) and would otherwise walk past N. Apps removed with H/Q/M count against the allowance via `actedOnPIDs` rather than freeing a slot — otherwise culling app #3 promotes the old #6 and the panel refills as fast as you empty it. Removals stay monotonic within a session; the next Cmd+Tab is a fresh snapshot at full N. The append pass itself is `appendNewlyVisibleApps()`, shared with the ⌥⌘Tab expansion (`expandToFullList()`): the `expandedSession` flag — decided afresh on every open, set by expansion — switches the pass's source to `allVisibleApps()` and makes `remainingSlots()` unbounded, so an expanded session stays uncapped for the refresh too
 - Handles mouse clicks (inside panel = activate clicked app, outside = dismiss)
 - **Permission gating**: never disables native Cmd+Tab until the event tap is alive
   - `enableSwitching()`: creates the tap FIRST, and only then disables native Cmd+Tab + registers the Cmd+Tab hotkey (order matters)
@@ -89,6 +89,7 @@ swift-testing is mechanical — one `Check` call per assertion.
 
 **HotkeyManager.swift**
 - Registers Cmd+Tab AND Cmd+Shift+Tab globally (via `registerHotkeys()`, called by AppDelegate once permission is confirmed). Carbon hotkeys need an exact modifier match, so the Shift variant is its own registration — without it Cmd+Shift+Tab (whose native handler we disable) would do nothing. From idle it opens the panel selecting the LAST app (reverse/wrap-around); while open, Shift+Tab steps backward.
+- **⌥⌘Tab (show all)**: a third global registration, made only while `limitRecentApps` is on — a Carbon hotkey steals its combo system-wide, so it isn't squatted for users who never enable the cap. `registerShowAllHotkey()`/`unregisterShowAllHotkey()` are idempotent and guarded on the Carbon handler being installed: a Preferences toggle firing before Accessibility is granted must not consume ⌥⌘Tab with nothing listening. `registerHotkeys()` does the initial registration; the Preferences window's `onToggleLimitRecent` callback flips it live (terminal-side `defaults write` takes effect at relaunch). Its id (14) is deliberately absent from `hotkeyToKeyCode` — it dispatches on its own branch to `hotkeyTriggeredShowAll()`, like `hideOthers`. Being global, one registration covers both idle and panel-open; AppDelegate branches on state
 - **Shift-tap vs Shift+Tab disambiguation**: the legacy "tap Shift to go back" gesture fires on Shift *release*, and only if no Cmd+Shift+Tab fired during the hold. Firing on press would double-step every Shift+Tab. The state machine is `ShiftTapResolver` in SwitcherKernels; HotkeyManager feeds it flag transitions inside a single `stateQueue` critical section, since the tap thread and the main-thread Carbon handler both touch it
 - `tryCreateEventTap() -> Bool`: creates the CGEvent tap; returns false when Accessibility permission is missing (the gate AppDelegate checks before touching native Cmd+Tab). Idempotent.
 - **`.listenOnly` (passive) CGEvent tap**: the window server never waits on it, so revoking Accessibility while it's alive cannot freeze input (an active `.defaultTap` can — forums thread 735204). Trade-off: a passive tap can't consume events — outside clicks are instead swallowed by AppSwitcherPanel's invisible per-screen click-shield windows (see below), which turn click-away into a plain dismiss.
@@ -106,7 +107,7 @@ swift-testing is mechanical — one `Check` call per assertion.
 **AppListProvider.swift**
 - Maintains MRU (Most Recently Used) order via NSWorkspace notifications, seeded at launch from window z-order (see MRU Tracking below)
 - `getVisibleApps()`: Returns apps with visible windows OR a Dock badge, sorted by MRU — and capped to the N most recent when `limitRecentApps` is on
-- **Recent-apps cap** (`limitRecentApps` / `recentAppsLimit`, default off / 7): `allVisibleApps()` is the uncapped list and `getVisibleApps()` is `prefix(N)` of it. That one line is the whole cap, because `sortByMRU` is the codebase's only ordering point and all three consumers (panel open, the 300ms refresh, `--list-apps`) funnel through `getVisibleApps()`. N counts the app you're currently in, so 7 means 7 icons and 6 switch targets. A Dock badge does NOT exempt an app from the cap — it only rescues it past the window filter — so a badged Mail you haven't touched drops off, which is what keeps N predictable. Ships **off**: with it on, apps outside the window are not reachable from the switcher at all. That's the feature, but it's not something to turn on for someone. Side effect at small N: the grid never wraps, so the `⌥⌘H` declutter tip (2+ rows) can no longer appear and `selectUp`/`selectDown` are inert
+- **Recent-apps cap** (`limitRecentApps` / `recentAppsLimit`, default off / 7): `allVisibleApps()` is the uncapped list and `getVisibleApps()` is `prefix(N)` of it. That one line is the whole cap, because `sortByMRU` is the codebase's only ordering point and all three consumers (panel open, the 300ms refresh, `--list-apps`) funnel through `getVisibleApps()`. N counts the app you're currently in, so 7 means 7 icons and 6 switch targets. A Dock badge does NOT exempt an app from the cap — it only rescues it past the window filter — so a badged Mail you haven't touched drops off, which is what keeps N predictable. Ships **off**: with it on, apps outside the window are reachable only through ⌥⌘Tab, the per-session escape hatch — from idle it opens the full uncapped list, while the capped panel is open it appends the apps the cap cut (one-shot: the next Cmd+Tab is capped again). That's the feature, but it's not something to turn on for someone. Side effect at small N: the grid never wraps, so the `⌥⌘H` declutter tip (2+ rows) can no longer appear and `selectUp`/`selectDown` are inert
 - Uses CGWindowListCopyWindowInfo to find visible windows
 - The accept/reject rule itself is `WindowFilter` in SwitcherKernels: 0 <= layer <= 20, bounds >= 50x50, off-screen windows accepted if they have an owner name (covers other Spaces — and, before the minimized pass, minimized windows too). Evidence and the missing-key defaults: `WindowFilterSpecs.md`
 - **Minimized pass** (`classifyWindows()`): windows accepted by the **off-screen branch only** get their wids submitted as ONE batched `SLSWindowQueryWindows`, then get a three-way verdict — keep (a real window on another Space) / minimized / notSwitchable. The third case matters as much as the second: nearly every app owns an invisible off-screen 500×500 helper window that is never minimized, and it alone will hold an app in the switcher forever (this is what made the first cut of 1.2.0 fail on Chrome, Signal and Crypto Pro). Space membership does NOT separate them — genuine other-Space windows also report no Space. On-screen windows are never queried, which is what makes the restore race benign — a restored window is back on-screen before the bit clears (~644ms late per AltTab). An app stays listed if ANY of its windows survives, and a Dock badge rescues it regardless. Decode + evidence: `MinimizedState` / `MinimizedStateSpecs.md`
@@ -155,11 +156,11 @@ swift-testing is mechanical — one `Check` call per assertion.
 
 **PreferencesWindowController.swift**
 - Reusable programmatic Preferences window (`isReleasedWhenClosed = false`)
-- Checkboxes: "Start at login" (hidden on macOS < 13), "Show icon in menu bar", "Grayscale icons", "Show declutter tip in switcher", "Hide apps with only minimized windows", and "Show only the [N] most recently used apps" (a horizontal sub-stack: checkbox + `NSPopUpButton` 2…12 + label, popup disabled while the checkbox is off); plus Donate and Quit buttons and a version label. The window's `contentRect` height is fixed, so adding a row means growing it
+- Checkboxes: "Start at login" (hidden on macOS < 13), "Show icon in menu bar", "Grayscale icons", "Show declutter tip in switcher", "Hide apps with only minimized windows", and "Show only the [N] most recently used apps" (a horizontal sub-stack: checkbox + `NSPopUpButton` 2…12 + label, popup disabled while the checkbox is off, with a small "⌥⌘Tab shows all apps" hint line underneath — hidden while the cap is off, when that hotkey isn't registered); plus Donate and Quit buttons and a version label. The window's `contentRect` height is fixed, so adding a row means growing it
 - The count is a popup, not a text field, on purpose: no formatter, no clamping, no half-typed state to validate for a number with a handful of sensible values
 - The "Start at login" checkbox reflects the live `SMAppService` state (not a stored pref); `syncFromPreferences()` refreshes all controls on show
 - `show()` calls `NSApp.activate(ignoringOtherApps:)` + `makeKeyAndOrderFront` so controls are clickable while staying `.accessory` (no Dock icon)
-- `onToggleMenuBar` callback lets AppDelegate show/hide the status item immediately
+- `onToggleMenuBar` callback lets AppDelegate show/hide the status item immediately; `onToggleLimitRecent` likewise lets it register/unregister the ⌥⌘Tab show-all hotkey live (guarded in HotkeyManager, so a pre-permission toggle is a no-op)
 
 **Preferences / menu bar / donation flow (AppDelegate)**
 - App starts silently — the Preferences window does NOT auto-open on every launch
@@ -276,13 +277,14 @@ This creates `Switcher.app` which can be moved to `/Applications`.
 
 ## Keyboard Shortcuts (while panel is open)
 
-Cmd+Shift+Tab from **idle** opens the switcher selecting the last (least recently used) app, mirroring the native reverse gesture.
+Cmd+Shift+Tab from **idle** opens the switcher selecting the last (least recently used) app, mirroring the native reverse gesture. When the recent-apps cap is on, ⌥⌘Tab from idle opens the switcher showing the full **uncapped** list.
 
 | Key | Action |
 |-----|--------|
 | Tab | Select next app |
 | Shift+Tab | Select previous app |
 | Shift (tap, no Tab) | Select previous app (fires on Shift release) |
+| ⌥⌘Tab | Show all apps — expand past the recent-apps cap (press again: select next) |
 | Left Arrow | Select previous app |
 | Right Arrow | Select next app |
 | Up Arrow | Select app in row above (multi-row only) |
@@ -362,6 +364,7 @@ rm Switcher.zip
 
 - [x] Hide apps whose windows are all minimized (1.2.0, via the WindowServer tag bit)
 - [x] Cap the switcher to the N most recently used apps (`limitRecentApps`, default off — under evaluation)
+- [x] ⌥⌘Tab shows the full list when the cap is on (the cap's escape hatch)
 - [ ] Persist `mruOrder` across launches, so the recent-apps cap doesn't fall back to the z-order proxy after a restart
 - [ ] Number keys (1-9) for quick selection
 - [ ] Window thumbnails (requires Screen Recording permission)

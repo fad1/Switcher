@@ -21,9 +21,10 @@ A fast, lightweight Cmd+Tab replacement for macOS. No bloat, no lag, no memory l
 - ✅ Instant response (<16ms)
 - ✅ Light memory footprint (releases its UI when idle)
 - ✅ Negligible background CPU (a lightweight permission check, no window polling)
-- ✅ Keyboard shortcuts: H to hide, Q to quit, Shift to go back
+- ✅ Keyboard shortcuts: H to hide, Q to quit, M to minimize, Cmd+, for Preferences, Shift to go back
 - ✅ Mouse support: hover to select, click to activate
 - ✅ Multi-monitor: appears on screen where your pointer is
+- ✅ Optional: show only your N most recent apps — Cmd+Opt+Tab reveals the rest when you need them
 
 ## What Switcher Doesn't Do
 
@@ -78,6 +79,7 @@ Open **Preferences** (menu bar ⌘) and tick **Start at login** (macOS 13+). Or 
 | Key | Action |
 |-----|--------|
 | Cmd+Tab | Open switcher / next app |
+| Cmd+Opt+Tab | Show all apps (when the recent-apps limit is on) |
 | Shift | Previous app |
 | ←/→ | Navigate left/right |
 | ↑/↓ | Navigate up/down (when multiple rows) |
@@ -96,8 +98,12 @@ Mouse: hover to select (after slight movement), click to activate.
 Switcher runs in the background. Open **Preferences** from its menu bar icon, or by
 launching Switcher again while it's already running. The window lets you:
 
+- **Start at login** — launch Switcher automatically (macOS 13+)
 - **Show icon in menu bar** — toggle the menu bar icon on or off
 - **Grayscale icons** — show app icons without color (applies on the next Cmd+Tab)
+- **Show declutter tip in switcher** — the ⌥⌘H "Hide others" hint that appears at 2+ rows
+- **Hide apps with only minimized windows** — keep fully-minimized apps out of the list
+- **Show only the [N] most recently used apps** — cap the switcher to your N most recent apps (2–12). When it's on, **Cmd+Opt+Tab** shows the full list for that one press of the switcher — handy when the app you want is older than the cap
 - **Donate** — support development
 
 The menu bar icon (⌘) also has a quick **Grayscale Icons** toggle, plus Preferences, Donate, and Quit.
@@ -114,7 +120,7 @@ defaults delete com.simpleswitcher.app grayscaleIcons             # revert
 
 ## Technical Details
 
-~1,900 lines of Swift across 12 files. No dependencies. Uses:
+~3,000 lines of Swift across 13 files, plus ~400 lines of pure, tested kernel logic. No dependencies. Uses:
 - Carbon hotkeys (avoids Input Monitoring requirement)
 - CGEvent tap for modifier detection
 - Private `CGSSetSymbolicHotKeyEnabled` API to intercept native Cmd+Tab

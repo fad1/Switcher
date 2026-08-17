@@ -7,6 +7,10 @@ protocol HotkeyManagerDelegate: AnyObject {
     /// Cmd+Shift+Tab: open the switcher in reverse (from idle) or step backward
     /// (while active) — mirrors the native reverse-cycling gesture.
     func hotkeyTriggeredReverse()
+    /// Cmd+Opt+Tab: open the switcher with the FULL uncapped list (from idle) or
+    /// expand the current session to it (while active). Only registered while
+    /// the recent-apps cap is on — it's the cap's escape hatch.
+    func hotkeyTriggeredShowAll()
     func modifierKeyReleased()
     func keyPressed(_ keyCode: UInt16)
     /// Shift pressed and released while Cmd is held, with no Shift+Tab in
@@ -27,6 +31,7 @@ class HotkeyManager {
     private var hotKeyPressedHandler: EventHandlerRef?
     private var tabHotKeyRef: EventHotKeyRef?
     private var shiftTabHotKeyRef: EventHotKeyRef?
+    private var showAllHotKeyRef: EventHotKeyRef?
     private var activeHotKeyRefs: [EventHotKeyRef?] = []
     private var eventTap: CFMachPort?
 
@@ -88,6 +93,7 @@ class HotkeyManager {
         case shiftTab = 11  // Cmd+Shift+Tab - activate in reverse/previous
         case m = 12         // Cmd+M - minimize every window of the selected app
         case comma = 13     // Cmd+, - open Preferences (the macOS-wide convention)
+        case showAll = 14   // Cmd+Opt+Tab - open/expand the full uncapped list
     }
 
     // Map hotkey IDs to key codes for delegate
@@ -131,6 +137,7 @@ class HotkeyManager {
             UnregisterEventHotKey(ref)
             shiftTabHotKeyRef = nil
         }
+        unregisterShowAllHotkey()
 
         unregisterActiveHotkeys()
 
@@ -288,6 +295,11 @@ class HotkeyManager {
                     DispatchQueue.main.async {
                         manager.delegate?.hotkeyTriggeredReverse()
                     }
+                } else if id.id == HotkeyID.showAll.rawValue {
+                    manager.isActive = true
+                    DispatchQueue.main.async {
+                        manager.delegate?.hotkeyTriggeredShowAll()
+                    }
                 } else if id.id == HotkeyID.hideOthers.rawValue {
                     // Cmd+Opt+H - hide others. Its own path so it isn't misrouted to
                     // keyPressed(H), which hides only the selected app.
@@ -317,6 +329,32 @@ class HotkeyManager {
         RegisterEventHotKey(UInt32(kVK_Tab), UInt32(cmdKey), id, eventTarget, UInt32(kEventHotKeyNoOptions), &tabHotKeyRef)
         let shiftId = EventHotKeyID(signature: HotkeyManager.signature, id: HotkeyID.shiftTab.rawValue)
         RegisterEventHotKey(UInt32(kVK_Tab), UInt32(cmdKey | shiftKey), shiftId, eventTarget, UInt32(kEventHotKeyNoOptions), &shiftTabHotKeyRef)
+
+        // ⌥⌘Tab is the recent-apps cap's escape hatch; a Carbon hotkey steals the
+        // combo system-wide, so don't squat it for users who never enable the cap.
+        // Live pref flips re/unregister via AppDelegate's onToggleLimitRecent wiring.
+        if Preferences.limitRecentApps {
+            registerShowAllHotkey()
+        }
+    }
+
+    /// Register the global Cmd+Opt+Tab hotkey (show the full uncapped list).
+    /// Guarded on the Carbon handler being installed — registering earlier (the
+    /// Preferences toggle firing before Accessibility is granted) would consume
+    /// ⌥⌘Tab system-wide with nothing listening. Idempotent.
+    func registerShowAllHotkey() {
+        guard hotKeyPressedHandler != nil, showAllHotKeyRef == nil else { return }
+        let id = EventHotKeyID(signature: HotkeyManager.signature, id: HotkeyID.showAll.rawValue)
+        RegisterEventHotKey(UInt32(kVK_Tab), UInt32(cmdKey | optionKey), id,
+                            GetEventDispatcherTarget(), UInt32(kEventHotKeyNoOptions), &showAllHotKeyRef)
+    }
+
+    /// Idempotent; a no-op if never registered.
+    func unregisterShowAllHotkey() {
+        if let ref = showAllHotKeyRef {
+            UnregisterEventHotKey(ref)
+            showAllHotKeyRef = nil
+        }
     }
 
     // MARK: - Event Tap (for modifier release and mouse clicks only)
