@@ -83,6 +83,8 @@ Open **Preferences** (menu bar ⌘) and tick **Start at login** (macOS 13+). Or 
 | ↑/↓ | Navigate up/down (when multiple rows) |
 | H | Hide selected app |
 | Q | Quit selected app |
+| M | Minimize selected app's windows |
+| , | Open Preferences |
 | Return | Activate |
 | Escape | Dismiss |
 | Release Cmd | Activate selected |

@@ -106,7 +106,7 @@ swift-testing is mechanical — one `Check` call per assertion.
 **AppListProvider.swift**
 - Maintains MRU (Most Recently Used) order via NSWorkspace notifications, seeded at launch from window z-order (see MRU Tracking below)
 - `getVisibleApps()`: Returns apps with visible windows OR a Dock badge, sorted by MRU — and capped to the N most recent when `limitRecentApps` is on
-- **Recent-apps cap** (`limitRecentApps` / `recentAppsLimit`, default off / 5): `allVisibleApps()` is the uncapped list and `getVisibleApps()` is `prefix(N)` of it. That one line is the whole cap, because `sortByMRU` is the codebase's only ordering point and all three consumers (panel open, the 300ms refresh, `--list-apps`) funnel through `getVisibleApps()`. N counts the app you're currently in, so 5 means 5 icons and 4 switch targets. A Dock badge does NOT exempt an app from the cap — it only rescues it past the window filter — so a badged Mail you haven't touched drops off, which is what keeps N predictable. Ships **off**: with it on, apps outside the window are not reachable from the switcher at all. That's the feature, but it's not something to turn on for someone. Side effect at small N: the grid never wraps, so the `⌥⌘H` declutter tip (2+ rows) can no longer appear and `selectUp`/`selectDown` are inert
+- **Recent-apps cap** (`limitRecentApps` / `recentAppsLimit`, default off / 7): `allVisibleApps()` is the uncapped list and `getVisibleApps()` is `prefix(N)` of it. That one line is the whole cap, because `sortByMRU` is the codebase's only ordering point and all three consumers (panel open, the 300ms refresh, `--list-apps`) funnel through `getVisibleApps()`. N counts the app you're currently in, so 7 means 7 icons and 6 switch targets. A Dock badge does NOT exempt an app from the cap — it only rescues it past the window filter — so a badged Mail you haven't touched drops off, which is what keeps N predictable. Ships **off**: with it on, apps outside the window are not reachable from the switcher at all. That's the feature, but it's not something to turn on for someone. Side effect at small N: the grid never wraps, so the `⌥⌘H` declutter tip (2+ rows) can no longer appear and `selectUp`/`selectDown` are inert
 - Uses CGWindowListCopyWindowInfo to find visible windows
 - The accept/reject rule itself is `WindowFilter` in SwitcherKernels: 0 <= layer <= 20, bounds >= 50x50, off-screen windows accepted if they have an owner name (covers other Spaces — and, before the minimized pass, minimized windows too). Evidence and the missing-key defaults: `WindowFilterSpecs.md`
 - **Minimized pass** (`classifyWindows()`): windows accepted by the **off-screen branch only** get their wids submitted as ONE batched `SLSWindowQueryWindows`, then get a three-way verdict — keep (a real window on another Space) / minimized / notSwitchable. The third case matters as much as the second: nearly every app owns an invisible off-screen 500×500 helper window that is never minimized, and it alone will hold an app in the switcher forever (this is what made the first cut of 1.2.0 fail on Chrome, Signal and Crypto Pro). Space membership does NOT separate them — genuine other-Space windows also report no Space. On-screen windows are never queried, which is what makes the restore race benign — a restored window is back on-screen before the bit clears (~644ms late per AltTab). An app stays listed if ANY of its windows survives, and a Dock badge rescues it regardless. Decode + evidence: `MinimizedState` / `MinimizedStateSpecs.md`
@@ -141,7 +141,7 @@ swift-testing is mechanical — one `Check` call per assertion.
 
 **Preferences.swift**
 - `enum Preferences`: single source of truth for persisted settings over `UserDefaults.standard`
-- Keys: `grayscaleIcons`, `showMenuBarIcon` (defaults to true), `showDeclutterTip` (defaults to true), `hideMinimizedOnlyApps` (defaults to true), `limitRecentApps`, `recentAppsLimit` (defaults to 5), `launchCount`, `hasDonated`
+- Keys: `grayscaleIcons`, `showMenuBarIcon` (defaults to true), `showDeclutterTip` (defaults to true), `hideMinimizedOnlyApps` (defaults to true), `limitRecentApps`, `recentAppsLimit` (defaults to 7), `launchCount`, `hasDonated`
 - The recent-apps cap is deliberately **two** keys rather than "0 means off": switching it off and back on must not discard a tuned count. The count is registered, the switch is not (so it ships off, like `grayscaleIcons`)
 - `registerDefaults()` must run before any read on every launch (`register(defaults:)` does not persist)
 - `openDonatePage()`: the one choke point for donating — sets `hasDonated = true`, then opens the Ko-fi URL
@@ -291,6 +291,7 @@ Cmd+Shift+Tab from **idle** opens the switcher selecting the last (least recentl
 | ⌥⌘H | Hide all other apps (declutter), then dismiss |
 | M | Minimize the selected app's windows **on the current Space** (see WindowActions) |
 | Q | Quit selected app |
+| , | Dismiss and open Preferences (the macOS-wide Cmd+, convention) |
 | Return | Activate selected app |
 | Escape | Dismiss without switching |
 | Release Cmd | Activate selected app |

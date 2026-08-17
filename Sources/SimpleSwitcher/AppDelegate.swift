@@ -230,6 +230,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, HotkeyManagerDelegate, AppSw
         case kVK_ANSI_Q:
             quitSelectedApp()
 
+        case kVK_ANSI_Comma:
+            // Cmd+, — the macOS-wide Preferences shortcut. Dismiss first: the panel
+            // is a non-activating overlay and showPreferences() activates Switcher,
+            // so leaving it up would put a floating panel over its own window.
+            dismissPanel()
+            showPreferences()
+
         default:
             break
         }

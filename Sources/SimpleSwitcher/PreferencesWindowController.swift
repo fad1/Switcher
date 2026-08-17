@@ -80,7 +80,7 @@ class PreferencesWindowController: NSWindowController {
         recentLimitPopup.action = #selector(changeRecentLimit)
 
         // The count reads as part of the sentence, so the row is one line:
-        // "Show only the [5] most recently used apps".
+        // "Show only the [7] most recently used apps".
         let limitRow = NSStackView(views: [
             limitRecentCheckbox,
             recentLimitPopup,
@@ -146,7 +146,7 @@ class PreferencesWindowController: NSWindowController {
         // selected, so fall back to the registered default.
         recentLimitPopup.selectItem(withTitle: String(Preferences.recentAppsLimit))
         if recentLimitPopup.indexOfSelectedItem < 0 {
-            recentLimitPopup.selectItem(withTitle: "5")
+            recentLimitPopup.selectItem(withTitle: "7")
         }
         recentLimitPopup.isEnabled = Preferences.limitRecentApps
     }

@@ -87,6 +87,7 @@ class HotkeyManager {
         case hideOthers = 10 // Cmd+Opt+H - hide all apps except the frontmost
         case shiftTab = 11  // Cmd+Shift+Tab - activate in reverse/previous
         case m = 12         // Cmd+M - minimize every window of the selected app
+        case comma = 13     // Cmd+, - open Preferences (the macOS-wide convention)
     }
 
     // Map hotkey IDs to key codes for delegate
@@ -95,6 +96,7 @@ class HotkeyManager {
         HotkeyID.h.rawValue: UInt16(kVK_ANSI_H),
         HotkeyID.q.rawValue: UInt16(kVK_ANSI_Q),
         HotkeyID.m.rawValue: UInt16(kVK_ANSI_M),
+        HotkeyID.comma.rawValue: UInt16(kVK_ANSI_Comma),
         HotkeyID.leftArrow.rawValue: UInt16(kVK_LeftArrow),
         HotkeyID.rightArrow.rawValue: UInt16(kVK_RightArrow),
         HotkeyID.upArrow.rawValue: UInt16(kVK_UpArrow),
@@ -115,7 +117,7 @@ class HotkeyManager {
         kVK_ANSI_0, kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5,
         kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9,
         kVK_ANSI_Minus, kVK_ANSI_Equal, kVK_ANSI_LeftBracket, kVK_ANSI_RightBracket,
-        kVK_ANSI_Backslash, kVK_ANSI_Semicolon, kVK_ANSI_Quote, kVK_ANSI_Comma,
+        kVK_ANSI_Backslash, kVK_ANSI_Semicolon, kVK_ANSI_Quote,
         kVK_ANSI_Period, kVK_ANSI_Slash, kVK_ANSI_Grave,
         kVK_Space, kVK_Delete, kVK_ForwardDelete,
     ]
@@ -161,6 +163,7 @@ class HotkeyManager {
             (.h, kVK_ANSI_H),
             (.q, kVK_ANSI_Q),
             (.m, kVK_ANSI_M),
+            (.comma, kVK_ANSI_Comma),
             (.leftArrow, kVK_LeftArrow),
             (.rightArrow, kVK_RightArrow),
             (.upArrow, kVK_UpArrow),
@@ -188,7 +191,7 @@ class HotkeyManager {
 
         // These ids are absent from `hotkeyToKeyCode`, so the Carbon handler no-ops
         // them — registration alone consumes the keystroke. The 0x1000 offset keeps
-        // them clear of the action ids (1–11).
+        // them clear of the action ids (1–13).
         for keyCode in HotkeyManager.swallowKeyCodes {
             var ref: EventHotKeyRef?
             let id = EventHotKeyID(signature: HotkeyManager.signature, id: UInt32(0x1000 + keyCode))

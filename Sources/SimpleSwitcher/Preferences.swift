@@ -30,7 +30,7 @@ enum Preferences {
             Key.hideMinimizedOnlyApps: true,
             // The count is registered but the switch is not: the cap ships off,
             // and this is the number it takes when first turned on.
-            Key.recentAppsLimit: 5,
+            Key.recentAppsLimit: 7,
         ])
     }
 
